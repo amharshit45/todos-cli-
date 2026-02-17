@@ -6,10 +6,12 @@ import (
 	"os"
 )
 
+// TODO: Consider using a map instead of a slice for the todos.
+
 type Todo struct {
-	ID          int
-	Description string
-	Completed   bool
+	ID          int    `json:"id"`
+	Description string `json:"description"`
+	Completed   bool   `json:"completed"`
 }
 
 /*
@@ -19,54 +21,76 @@ type Todo struct {
 4. Save the JSON file
 */
 
+// TODO: Handle large files.
+// TODO: Handle missing file gracefully. [Create a new file or return empty list]
+// TODO: Validate JSON structure of the file and handle unknown fields.
+// TODO: Shift to Decoder based unmarshalling.
 func readTodos() ([]Todo, error) {
-	todoBytes, err := os.ReadFile("todos.json")
+	data, err := os.ReadFile("todos.json")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to read todos file: %w", err)
 	}
-
 	var todos []Todo
-	err = json.Unmarshal(todoBytes, &todos)
+	err = json.Unmarshal(data, &todos)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to unmarshal todos file: %w", err)
 	}
 	return todos, nil
 }
 
+// TODO: Make the writes atomic.
+// TODO: Consider backing up the file before writing.
+// TODO: Consider using checksums to verify the file integrity.
 func updateTodos(todos []Todo) error {
-	todoBytes, err := json.MarshalIndent(todos, "", "  ")
+	data, err := json.MarshalIndent(todos, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("Unable to marshal todos: %w", err)
 	}
-	err = os.WriteFile("todos.json", todoBytes, 0644)
+	data = append(data, '\n')
+	err = os.WriteFile("todos.json", data, 0644)
 	if err != nil {
-		return err
+		return fmt.Errorf("Unable to write to todos file: %w", err)
 	}
 	return nil
 }
 
-func removeTodo(todos []Todo, id int) []Todo {
+func removeTodo(todos []Todo, id int) ([]Todo, error) {
+	if id <= 0 {
+		return todos, fmt.Errorf("Invalid id: %d", id)
+	}
 	for i, todo := range todos {
 		if todo.ID == id {
-			return append(todos[:i], todos[i+1:]...)
+			return append(todos[:i], todos[i+1:]...), nil
 		}
 	}
-	return todos
+	return todos, fmt.Errorf("Todo with id %d not found", id)
 }
 
-func markComplete(todos []Todo, id int) []Todo {
+func toggleComplete(todos []Todo, id int) error {
+	if id <= 0 {
+		return fmt.Errorf("Invalid id: %d", id)
+	}
 	for i, todo := range todos {
 		if todo.ID == id {
-			todos[i].Completed = true
-			return todos
+			todos[i].Completed = !todos[i].Completed
+			return nil
 		}
 	}
-	return todos
+	return fmt.Errorf("Todo with id %d not found", id)
 }
 
 func printTodos(todos []Todo) {
+	if len(todos) == 0 {
+		fmt.Println("No todos found.")
+		return
+	}
 	for _, todo := range todos {
-		fmt.Printf("%d. %s\n", todo.ID, todo.Description)
+		if todo.Completed {
+			// ANSI strikethrough: \033[9m text \033[0m
+			fmt.Printf("[✓] %d. \033[9m%s\033[0m\n", todo.ID, todo.Description)
+		} else {
+			fmt.Printf("[ ] %d. %s\n", todo.ID, todo.Description)
+		}
 	}
 }
 
@@ -78,6 +102,9 @@ func main() {
 	}
 	for {
 		fmt.Printf("> ")
+		// TODO: Read the command as a complete line, not just a single word.
+		// TODO: Use a scanner to read the command.
+		// TODO: Validate commands.
 		var command string
 		fmt.Scanln(&command)
 		switch command {
@@ -94,13 +121,28 @@ func main() {
 			var id int
 			// TODO: Validate id is a number.
 			fmt.Scanln(&id)
-			todos = removeTodo(todos, id)
+			todos, err = removeTodo(todos, id)
+			if err != nil {
+				fmt.Printf("Error deleting todo: %v\n", err)
+			}
 		case "complete":
 			fmt.Println("Enter the id of the todo to mark as complete:")
 			var id int
 			// TODO: Validate id is a number.
 			fmt.Scanln(&id)
-			todos = markComplete(todos, id)
+			err = toggleComplete(todos, id)
+			if err != nil {
+				fmt.Printf("Error marking todo as complete: %v\n", err)
+			}
+		case "incomplete":
+			fmt.Println("Enter the id of the todo to mark as incomplete:")
+			var id int
+			// TODO: Validate id is a number.
+			fmt.Scanln(&id)
+			err = toggleComplete(todos, id)
+			if err != nil {
+				fmt.Printf("Error marking todo as incomplete: %v\n", err)
+			}
 		case "exit":
 			return
 		default:
@@ -110,3 +152,5 @@ func main() {
 		updateTodos(todos)
 	}
 }
+
+// TODO: Add graceful shutdown incase of interrupt signal.
