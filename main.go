@@ -22,11 +22,11 @@ type Todo struct {
 */
 
 // TODO: Handle large files.
-// TODO: Handle missing file gracefully. [Create a new file and return empty list]
 // TODO: Validate JSON structure of the file and handle unknown fields.
 // TODO: Shift to Decoder based unmarshalling.
 func readTodos() ([]Todo, error) {
-	data, err := os.ReadFile("todos.json")
+	var todos []Todo
+	file, err := os.Open("todos.json")
 	if err != nil {
 		if os.IsNotExist(err) {
 			file, err := os.Create("todos.json")
@@ -37,10 +37,13 @@ func readTodos() ([]Todo, error) {
 			file.Close()
 			return []Todo{}, nil
 		}
-		return nil, fmt.Errorf("Unable to read todos file: %w", err)
+		return nil, fmt.Errorf("Unable to open todos file: %w", err)
 	}
-	var todos []Todo
-	err = json.Unmarshal(data, &todos)
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&todos)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to unmarshal todos file: %w", err)
 	}
