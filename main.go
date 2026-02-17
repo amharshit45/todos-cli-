@@ -117,14 +117,12 @@ func main() {
 	// Goroutine to handle shutdown on signal
 	go func() {
 		<-sigChan
-		fmt.Println("\n\nReceived interrupt signal, saving todos...")
 		todosMutex.Lock()
 		defer todosMutex.Unlock()
 		if err := updateTodos(todos); err != nil {
 			fmt.Printf("Error saving todos during shutdown: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("Todos saved successfully. Goodbye!")
 		os.Exit(0)
 	}()
 
