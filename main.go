@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"strconv"
@@ -97,13 +98,13 @@ type CommandSpec struct {
 }
 
 var commandSpecs = map[string]CommandSpec{
-    "add":        {NumArgs: 1, ArgTypes: []string{"string"}},
-    "list":       {NumArgs: 0, ArgTypes: []string{}},
-    "delete":     {NumArgs: 1, ArgTypes: []string{"int"}},
-    "completed":  {NumArgs: 1, ArgTypes: []string{"int"}},
-    "incomplete": {NumArgs: 1, ArgTypes: []string{"int"}},
-    "edit":       {NumArgs: 2, ArgTypes: []string{"int", "string"}},
-    "exit":       {NumArgs: 0, ArgTypes: []string{}},
+	"add":        {NumArgs: 1, ArgTypes: []string{"string"}},
+	"list":       {NumArgs: 0, ArgTypes: []string{}},
+	"delete":     {NumArgs: 1, ArgTypes: []string{"int"}},
+	"completed":  {NumArgs: 1, ArgTypes: []string{"int"}},
+	"incomplete": {NumArgs: 1, ArgTypes: []string{"int"}},
+	"edit":       {NumArgs: 2, ArgTypes: []string{"int", "string"}},
+	"exit":       {NumArgs: 0, ArgTypes: []string{}},
 }
 
 // validateCommand validates a command and its arguments
@@ -176,7 +177,7 @@ func updateTodos(todos []Todo) error {
 
 func removeTodo(todos []Todo, id int) ([]Todo, error) {
 	if id <= 0 {
-		return todos, fmt.Errorf("Invalid id: %d", id)
+		return todos, fmt.Errorf("invalid id: %d", id)
 	}
 	for i, todo := range todos {
 		if todo.ID == id {
@@ -225,6 +226,10 @@ func printTodos(todos []Todo) {
 			fmt.Printf("[ ] %d. %s\n", todo.ID, todo.Description)
 		}
 	}
+}
+
+func generateTodoID() int {
+	return rand.Intn(1000000)
 }
 
 func main() {
@@ -282,7 +287,7 @@ func main() {
 		switch cmd {
 		case "add":
 			description := args[0]
-			todos = append(todos, Todo{ID: int(len(todos) + 1), Description: description})
+			todos = append(todos, Todo{ID: generateTodoID(), Description: description})
 			fmt.Println("Todo added successfully.")
 
 		case "list":
@@ -306,26 +311,26 @@ func main() {
 				fmt.Println("Todo marked as completed.")
 			}
 
-	case "incomplete":
-		id, _ := strconv.Atoi(args[0]) // Already validated
-		err = toggleComplete(todos, id)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Println("Todo marked as incomplete.")
-		}
+		case "incomplete":
+			id, _ := strconv.Atoi(args[0]) // Already validated
+			err = toggleComplete(todos, id)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Println("Todo marked as incomplete.")
+			}
 
-	case "edit":
-		id, _ := strconv.Atoi(args[0]) // Already validated
-		newDescription := args[1]
-		err = editTodo(todos, id, newDescription)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Println("Todo updated successfully.")
-		}
+		case "edit":
+			id, _ := strconv.Atoi(args[0]) // Already validated
+			newDescription := args[1]
+			err = editTodo(todos, id, newDescription)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Println("Todo updated successfully.")
+			}
 
-	case "exit":
+		case "exit":
 			if err := updateTodos(todos); err != nil {
 				fmt.Printf("Error saving todos: %v\n", err)
 				todosMutex.Unlock()
