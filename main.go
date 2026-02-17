@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 )
 
 // TODO: Consider using a map instead of a slice for the todos.
@@ -40,20 +43,21 @@ func readTodos() ([]Todo, error) {
 	return todos, nil
 }
 
-// TODO: Make the writes atomic.
-// TODO: Consider backing up the file before writing.
-// TODO: Consider using checksums to verify the file integrity.
 func updateTodos(todos []Todo) error {
 	data, err := json.MarshalIndent(todos, "", "  ")
 	if err != nil {
 		return fmt.Errorf("Unable to marshal todos: %w", err)
 	}
 	data = append(data, '\n')
-	err = os.WriteFile("todos.json", data, 0644)
-	if err != nil {
-		return fmt.Errorf("Unable to write to todos file: %w", err)
-	}
-	return nil
+	tmpFile := "todos.json.tmp"
+    if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+        return fmt.Errorf("failed to write temp file: %w", err)
+    }
+    if err := os.Rename(tmpFile, "todos.json"); err != nil {
+        os.Remove(tmpFile) 
+        return fmt.Errorf("failed to rename file: %w", err)
+    }
+    return nil
 }
 
 func removeTodo(todos []Todo, id int) ([]Todo, error) {
@@ -102,6 +106,28 @@ func main() {
 		fmt.Printf("Error reading JSON file: %v\n", err)
 		return
 	}
+
+	// Mutex to protect todos from concurrent access
+	var todosMutex sync.Mutex
+
+	// Set up channel to listen for interrupt signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Goroutine to handle shutdown on signal
+	go func() {
+		<-sigChan
+		fmt.Println("\n\nReceived interrupt signal, saving todos...")
+		todosMutex.Lock()
+		defer todosMutex.Unlock()
+		if err := updateTodos(todos); err != nil {
+			fmt.Printf("Error saving todos during shutdown: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Todos saved successfully. Goodbye!")
+		os.Exit(0)
+	}()
+
 	for {
 		fmt.Printf("> ")
 		// TODO: Read the command as a complete line, not just a single word.
@@ -109,6 +135,8 @@ func main() {
 		// TODO: Validate commands.
 		var command string
 		fmt.Scanln(&command)
+		
+		todosMutex.Lock()
 		switch command {
 		case "add":
 			fmt.Println("Enter a todo:")
@@ -146,13 +174,16 @@ func main() {
 				fmt.Printf("Error marking todo as incomplete: %v\n", err)
 			}
 		case "exit":
+			if err := updateTodos(todos); err != nil {
+				fmt.Printf("Error saving todos: %v\n", err)
+				todosMutex.Unlock()
+				return
+			}
+			todosMutex.Unlock()
 			return
 		default:
 			fmt.Println("Invalid command")
 		}
-		// TODO: Add a loop to update the todos file until it is successful, but also quit if there is a persistent error.
-		updateTodos(todos)
+		todosMutex.Unlock()
 	}
 }
-
-// TODO: Add graceful shutdown incase of interrupt signal.
