@@ -14,16 +14,6 @@ type Todo struct {
 	Completed   bool   `json:"completed"`
 }
 
-/*
-1. Read the JSON file
-2. Take input from user for command and description
-3. Perform the action based on the command
-4. Save the JSON file
-*/
-
-// TODO: Handle large files.
-// TODO: Validate JSON structure of the file and handle unknown fields.
-// TODO: Shift to Decoder based unmarshalling.
 func readTodos() ([]Todo, error) {
 	var todos []Todo
 	file, err := os.Open("todos.json")
