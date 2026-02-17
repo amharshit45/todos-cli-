@@ -1,72 +1,7 @@
 [
   {
-    "id": 1,
-    "description": "Water drinking",
-    "completed": true
-  },
-  {
     "id": 2,
-    "description": "Buy groceries",
-    "completed": false
-  },
-  {
-    "id": 3,
-    "description": "Buy groceries 2",
-    "completed": false
-  },
-  {
-    "id": 4,
-    "description": "Buy groceries32",
-    "completed": false
-  },
-  {
-    "id": 5,
-    "description": "a",
-    "completed": false
-  },
-  {
-    "id": 6,
-    "description": "water",
-    "completed": false
-  },
-  {
-    "id": 7,
-    "description": "pple",
-    "completed": false
-  },
-  {
-    "id": 8,
-    "description": "w",
-    "completed": false
-  },
-  {
-    "id": 9,
-    "description": "p",
-    "completed": false
-  },
-  {
-    "id": 10,
-    "description": "waaaaa",
-    "completed": false
-  },
-  {
-    "id": 11,
-    "description": "seve",
-    "completed": false
-  },
-  {
-    "id": 12,
-    "description": "\"hap",
-    "completed": false
-  },
-  {
-    "id": 13,
-    "description": "game",
-    "completed": false
-  },
-  {
-    "id": 14,
-    "description": "snakle",
+    "description": "g",
     "completed": false
   }
 ]
