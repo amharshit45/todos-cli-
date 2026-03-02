@@ -13,123 +13,42 @@ import (
 	"syscall"
 )
 
-// TODO: Consider using a map instead of a slice for the todos.
-
 type Todo struct {
 	ID          int    `json:"id"`
 	Description string `json:"description"`
 	Completed   bool   `json:"completed"`
 }
 
-func parseCommand(line string) (string, []string, error) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return "", nil, fmt.Errorf("empty command")
-	}
-
-	var tokens []string
-	var currentToken strings.Builder
-	inQuotes := false
-	escaped := false
-
-	for i, char := range line {
-		if escaped {
-			currentToken.WriteRune(char)
-			escaped = false
-			continue
-		}
-
-		if char == '\\' {
-			escaped = true
-			continue
-		}
-
-		if char == '"' {
-			if inQuotes {
-				// End of quoted string
-				tokens = append(tokens, currentToken.String())
-				currentToken.Reset()
-				inQuotes = false
-			} else {
-				// Start of quoted string
-				if currentToken.Len() > 0 {
-					return "", nil, fmt.Errorf("unexpected quote at position %d", i)
-				}
-				inQuotes = true
-			}
-			continue
-		}
-
-		if char == ' ' || char == '\t' {
-			if inQuotes {
-				currentToken.WriteRune(char)
-			} else if currentToken.Len() > 0 {
-				tokens = append(tokens, currentToken.String())
-				currentToken.Reset()
-			}
-			continue
-		}
-
-		currentToken.WriteRune(char)
-	}
-
-	if inQuotes {
-		return "", nil, fmt.Errorf("unclosed quote")
-	}
-
-	if currentToken.Len() > 0 {
-		tokens = append(tokens, currentToken.String())
-	}
-
-	if len(tokens) == 0 {
-		return "", nil, fmt.Errorf("empty command")
-	}
-
-	command := tokens[0]
-	args := tokens[1:]
-
-	return command, args, nil
+func printMenu() {
+	fmt.Println("===== Todo CLI =====")
+	fmt.Println("1. Add a todo")
+	fmt.Println("2. List todos")
+	fmt.Println("3. Delete a todo")
+	fmt.Println("4. Mark as completed")
+	fmt.Println("5. Mark as incomplete")
+	fmt.Println("6. Edit a todo")
+	fmt.Println("7. Exit")
+	fmt.Println("====================")
 }
 
-// CommandSpec defines the specification for a command
-type CommandSpec struct {
-	NumArgs  int
-	ArgTypes []string // "int" or "string"
+func readLine(scanner *bufio.Scanner, prompt string) (string, bool) {
+	fmt.Print(prompt)
+	if !scanner.Scan() {
+		return "", false
+	}
+	return strings.TrimSpace(scanner.Text()), true
 }
 
-var commandSpecs = map[string]CommandSpec{
-	"add":        {NumArgs: 1, ArgTypes: []string{"string"}},
-	"list":       {NumArgs: 0, ArgTypes: []string{}},
-	"delete":     {NumArgs: 1, ArgTypes: []string{"int"}},
-	"completed":  {NumArgs: 1, ArgTypes: []string{"int"}},
-	"incomplete": {NumArgs: 1, ArgTypes: []string{"int"}},
-	"edit":       {NumArgs: 2, ArgTypes: []string{"int", "string"}},
-	"exit":       {NumArgs: 0, ArgTypes: []string{}},
-}
-
-// validateCommand validates a command and its arguments
-func validateCommand(cmd string, args []string) error {
-	spec, exists := commandSpecs[cmd]
-	if !exists {
-		return fmt.Errorf("invalid command: '%s'", cmd)
+func readID(scanner *bufio.Scanner, prompt string) (int, bool, error) {
+	input, ok := readLine(scanner, prompt)
+	if !ok {
+		return 0, false, nil
 	}
-
-	if len(args) != spec.NumArgs {
-		return fmt.Errorf("command '%s' requires exactly %d argument(s)", cmd, spec.NumArgs)
+	id, err := strconv.Atoi(input)
+	if err != nil {
+		return 0, true, fmt.Errorf("invalid ID: '%s' is not a number", input)
 	}
-
-	for i, arg := range args {
-		if i < len(spec.ArgTypes) {
-			expectedType := spec.ArgTypes[i]
-			if expectedType == "int" {
-				if _, err := strconv.Atoi(arg); err != nil {
-					return fmt.Errorf("invalid ID: '%s' is not a number", arg)
-				}
-			}
-		}
-	}
-
-	return nil
+	return id, true, nil
 }
 
 func readTodos() ([]Todo, error) {
@@ -229,7 +148,7 @@ func printTodos(todos []Todo) {
 }
 
 func generateTodoID() int {
-	return rand.Intn(1000000)
+	return rand.Intn(1000)
 }
 
 func main() {
@@ -253,98 +172,135 @@ func main() {
 		}
 		os.Exit(0)
 	}()
-
+	printMenu()
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Printf("> ")
-		if !scanner.Scan() {
-			// EOF or error
+		choice, ok := readLine(scanner, "> Choose an option: ")
+		if !ok {
 			break
 		}
 
-		line := scanner.Text()
-
-		// Skip empty lines
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		// Parse command and arguments
-		cmd, args, err := parseCommand(line)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			continue
-		}
-
-		// Validate command
-		if err := validateCommand(cmd, args); err != nil {
-			fmt.Printf("Error: %v\n", err)
+		option, err := strconv.Atoi(choice)
+		if err != nil || option < 1 || option > 7 {
+			fmt.Println("Error: please enter a number between 1 and 7.")
 			continue
 		}
 
 		todosMutex.Lock()
+		modified := false
 
-		switch cmd {
-		case "add":
-			description := args[0]
-			todos = append(todos, Todo{ID: generateTodoID(), Description: description})
-			fmt.Println("Todo added successfully.")
-
-		case "list":
-			printTodos(todos)
-
-		case "delete":
-			id, _ := strconv.Atoi(args[0]) // Already validated
-			todos, err = removeTodo(todos, id)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo deleted successfully.")
-			}
-
-		case "completed":
-			id, _ := strconv.Atoi(args[0]) // Already validated
-			err = toggleComplete(todos, id)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo marked as completed.")
-			}
-
-		case "incomplete":
-			id, _ := strconv.Atoi(args[0]) // Already validated
-			err = toggleComplete(todos, id)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo marked as incomplete.")
-			}
-
-		case "edit":
-			id, _ := strconv.Atoi(args[0]) // Already validated
-			newDescription := args[1]
-			err = editTodo(todos, id, newDescription)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo updated successfully.")
-			}
-
-		case "exit":
-			if err := updateTodos(todos); err != nil {
-				fmt.Printf("Error saving todos: %v\n", err)
+		switch option {
+		case 1: // Add
+			desc, ok := readLine(scanner, "> Enter description: ")
+			if !ok {
 				todosMutex.Unlock()
 				return
 			}
+			if desc == "" {
+				fmt.Println("Error: description cannot be empty.")
+			} else {
+				todos = append(todos, Todo{ID: generateTodoID(), Description: desc})
+				fmt.Println("Todo added successfully.")
+				modified = true
+			}
+
+		case 2: // List
+			printTodos(todos)
+
+		case 3: // Delete
+			printTodos(todos)
+			id, ok, err := readID(scanner, "> Enter todo ID to delete: ")
+			if !ok {
+				todosMutex.Unlock()
+				return
+			}
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				todos, err = removeTodo(todos, id)
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else {
+					fmt.Println("Todo deleted successfully.")
+					modified = true
+				}
+			}
+
+		case 4: // Mark as completed
+			printTodos(todos)
+			id, ok, err := readID(scanner, "> Enter todo ID to mark as completed: ")
+			if !ok {
+				todosMutex.Unlock()
+				return
+			}
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				err = toggleComplete(todos, id)
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else {
+					fmt.Println("Todo marked as completed.")
+					modified = true
+				}
+			}
+
+		case 5: // Mark as incomplete
+			printTodos(todos)
+			id, ok, err := readID(scanner, "> Enter todo ID to mark as incomplete: ")
+			if !ok {
+				todosMutex.Unlock()
+				return
+			}
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				err = toggleComplete(todos, id)
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else {
+					fmt.Println("Todo marked as incomplete.")
+					modified = true
+				}
+			}
+
+		case 6: // Edit
+			printTodos(todos)
+			id, ok, err := readID(scanner, "> Enter todo ID to edit: ")
+			if !ok {
+				todosMutex.Unlock()
+				return
+			}
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				desc, ok := readLine(scanner, "> Enter new description: ")
+				if !ok {
+					todosMutex.Unlock()
+					return
+				}
+				if desc == "" {
+					fmt.Println("Error: description cannot be empty.")
+				} else {
+					err = editTodo(todos, id, desc)
+					if err != nil {
+						fmt.Printf("Error: %v\n", err)
+					} else {
+						fmt.Println("Todo updated successfully.")
+						modified = true
+					}
+				}
+			}
+
+		case 7: // Exit
+			if err := updateTodos(todos); err != nil {
+				fmt.Printf("Error saving todos: %v\n", err)
+			}
 			todosMutex.Unlock()
 			return
-
-		default:
-			fmt.Printf("Error: invalid command: '%s'\n", cmd)
 		}
 
-		// Save todos after each command (except list which doesn't modify)
-		if cmd != "list" && cmd != "exit" {
+		if modified {
 			if err := updateTodos(todos); err != nil {
 				fmt.Printf("Warning: failed to save todos: %v\n", err)
 			}
@@ -353,7 +309,6 @@ func main() {
 		todosMutex.Unlock()
 	}
 
-	// Handle scanner errors
 	if err := scanner.Err(); err != nil {
 		fmt.Printf("Error reading input: %v\n", err)
 	}
