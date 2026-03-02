@@ -20,6 +20,70 @@ type Todo struct {
 	Completed   bool   `json:"completed"`
 }
 
+// --- Storage layer ---
+
+type TodoStorage interface {
+	Load() ([]Todo, error)
+	Save(todos []Todo) error
+}
+
+type JSONStorage struct {
+	filePath string
+}
+
+func NewJSONStorage(filePath string) *JSONStorage {
+	return &JSONStorage{filePath: filePath}
+}
+
+func (js *JSONStorage) Load() ([]Todo, error) {
+	file, err := os.Open(js.filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			f, createErr := os.Create(js.filePath)
+			if createErr != nil {
+				return nil, fmt.Errorf("unable to create todos file: %w", createErr)
+			}
+			if _, writeErr := f.Write([]byte("[]\n")); writeErr != nil {
+				f.Close()
+				return nil, fmt.Errorf("unable to write todos file: %w", writeErr)
+			}
+			if err := f.Close(); err != nil {
+				return nil, fmt.Errorf("unable to close todos file: %w", err)
+			}
+			return []Todo{}, nil
+		}
+		return nil, fmt.Errorf("unable to open todos file: %w", err)
+	}
+	defer file.Close()
+
+	var todos []Todo
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&todos); err != nil {
+		return nil, fmt.Errorf("unable to unmarshal todos file: %w", err)
+	}
+	return todos, nil
+}
+
+func (js *JSONStorage) Save(todos []Todo) error {
+	data, err := json.MarshalIndent(todos, "", "  ")
+	if err != nil {
+		return fmt.Errorf("unable to marshal todos: %w", err)
+	}
+	data = append(data, '\n')
+	tmpFile := js.filePath + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := os.Rename(tmpFile, js.filePath); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("failed to rename file: %w", err)
+	}
+	return nil
+}
+
+// --- Business logic layer ---
+
 type TodoHandler interface {
 	Add(description string)
 	List() []Todo
@@ -31,70 +95,30 @@ type TodoHandler interface {
 }
 
 type TodoStore struct {
-	mu       sync.Mutex
-	todos    []Todo
-	filePath string
-	maxID    int
+	mu      sync.Mutex
+	todos   []Todo
+	storage TodoStorage
+	maxID   int
 }
 
-func NewTodoStore(filePath string) (*TodoStore, error) {
-	s := &TodoStore{filePath: filePath}
-	if err := s.load(); err != nil {
+func NewTodoStore(storage TodoStorage) (*TodoStore, error) {
+	todos, err := storage.Load()
+	if err != nil {
 		return nil, err
 	}
-	return s, nil
-}
 
-func (s *TodoStore) load() error {
-	file, err := os.Open(s.filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			s.todos = []Todo{}
-			s.maxID = 0
-			f, createErr := os.Create(s.filePath)
-			if createErr != nil {
-				return fmt.Errorf("unable to create todos file: %w", createErr)
-			}
-			if _, writeErr := f.Write([]byte("[]\n")); writeErr != nil {
-				f.Close()
-				return fmt.Errorf("unable to write todos file: %w", writeErr)
-			}
-			return f.Close()
-		}
-		return fmt.Errorf("unable to open todos file: %w", err)
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&s.todos); err != nil {
-		return fmt.Errorf("unable to unmarshal todos file: %w", err)
-	}
-
-	s.maxID = 0
-	for _, t := range s.todos {
-		if t.ID > s.maxID {
-			s.maxID = t.ID
+	maxID := 0
+	for _, t := range todos {
+		if t.ID > maxID {
+			maxID = t.ID
 		}
 	}
-	return nil
-}
 
-func (s *TodoStore) save() error {
-	data, err := json.MarshalIndent(s.todos, "", "  ")
-	if err != nil {
-		return fmt.Errorf("unable to marshal todos: %w", err)
-	}
-	data = append(data, '\n')
-	tmpFile := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-	if err := os.Rename(tmpFile, s.filePath); err != nil {
-		os.Remove(tmpFile)
-		return fmt.Errorf("failed to rename file: %w", err)
-	}
-	return nil
+	return &TodoStore{
+		todos:   todos,
+		storage: storage,
+		maxID:   maxID,
+	}, nil
 }
 
 func (s *TodoStore) nextID() int {
@@ -181,7 +205,7 @@ func (s *TodoStore) Edit(id int, description string) error {
 func (s *TodoStore) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.save()
+	return s.storage.Save(s.todos)
 }
 
 // --- UI helpers ---
@@ -235,7 +259,8 @@ func readID(scanner *bufio.Scanner, prompt string) (int, bool, error) {
 // --- Main ---
 
 func main() {
-	store, err := NewTodoStore(todosFile)
+	storage := NewJSONStorage(todosFile)
+	store, err := NewTodoStore(storage)
 	if err != nil {
 		fmt.Printf("Error loading todos: %v\n", err)
 		return
