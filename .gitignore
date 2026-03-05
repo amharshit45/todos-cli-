@@ -1,2 +1,3 @@
 bin
 todos.json
+.env

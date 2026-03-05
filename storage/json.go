@@ -4,18 +4,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
+
 	"github.com/amharshit45/todos-cli-/todo"
 )
 
 type JSONStorage struct {
+	mu       sync.Mutex
 	filePath string
+	maxID    int
 }
 
-func NewJSONStorage(filePath string) *JSONStorage {
-	return &JSONStorage{filePath: filePath}
+func NewJSONStorage(filePath string) (*JSONStorage, error) {
+	js := &JSONStorage{filePath: filePath}
+
+	todos, err := js.load()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, t := range todos {
+		if t.ID > js.maxID {
+			js.maxID = t.ID
+		}
+	}
+
+	return js, nil
 }
 
-func (js *JSONStorage) Load() ([]todo.Todo, error) {
+func (js *JSONStorage) load() ([]todo.Todo, error) {
 	file, err := os.Open(js.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -45,7 +62,7 @@ func (js *JSONStorage) Load() ([]todo.Todo, error) {
 	return todos, nil
 }
 
-func (js *JSONStorage) Save(todos []todo.Todo) error {
+func (js *JSONStorage) save(todos []todo.Todo) error {
 	data, err := json.MarshalIndent(todos, "", "  ")
 	if err != nil {
 		return fmt.Errorf("unable to marshal todos: %w", err)
@@ -59,5 +76,111 @@ func (js *JSONStorage) Save(todos []todo.Todo) error {
 		os.Remove(tmpFile)
 		return fmt.Errorf("failed to rename file: %w", err)
 	}
+	return nil
+}
+
+func (js *JSONStorage) findByID(todos []todo.Todo, id int) (int, error) {
+	if id <= 0 {
+		return -1, fmt.Errorf("invalid id: %d", id)
+	}
+	for i := range todos {
+		if todos[i].ID == id {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("todo with id %d not found", id)
+}
+
+func (js *JSONStorage) Add(description string) error {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+
+	todos, err := js.load()
+	if err != nil {
+		return err
+	}
+
+	js.maxID++
+	todos = append(todos, todo.Todo{ID: js.maxID, Description: description})
+	return js.save(todos)
+}
+
+func (js *JSONStorage) List() ([]todo.Todo, error) {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	return js.load()
+}
+
+func (js *JSONStorage) Delete(id int) error {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+
+	todos, err := js.load()
+	if err != nil {
+		return err
+	}
+	idx, err := js.findByID(todos, id)
+	if err != nil {
+		return err
+	}
+	todos = append(todos[:idx], todos[idx+1:]...)
+	return js.save(todos)
+}
+
+func (js *JSONStorage) SetCompleted(id int) error {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+
+	todos, err := js.load()
+	if err != nil {
+		return err
+	}
+	idx, err := js.findByID(todos, id)
+	if err != nil {
+		return err
+	}
+	if todos[idx].Completed {
+		return fmt.Errorf("todo %d is already completed", id)
+	}
+	todos[idx].Completed = true
+	return js.save(todos)
+}
+
+func (js *JSONStorage) SetIncomplete(id int) error {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+
+	todos, err := js.load()
+	if err != nil {
+		return err
+	}
+	idx, err := js.findByID(todos, id)
+	if err != nil {
+		return err
+	}
+	if !todos[idx].Completed {
+		return fmt.Errorf("todo %d is already incomplete", id)
+	}
+	todos[idx].Completed = false
+	return js.save(todos)
+}
+
+func (js *JSONStorage) Edit(id int, description string) error {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+
+	todos, err := js.load()
+	if err != nil {
+		return err
+	}
+	idx, err := js.findByID(todos, id)
+	if err != nil {
+		return err
+	}
+	todos[idx].Description = description
+	return js.save(todos)
+}
+
+func (js *JSONStorage) Close() error {
 	return nil
 }

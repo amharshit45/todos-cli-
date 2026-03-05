@@ -3,17 +3,18 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 
+	"github.com/joho/godotenv"
+
 	"github.com/amharshit45/todos-cli-/storage"
 	"github.com/amharshit45/todos-cli-/todo"
 )
-
-const todosFile = "todos.json"
 
 func printMenu() {
 	fmt.Println("===== Todo CLI =====")
@@ -62,22 +63,28 @@ func readID(scanner *bufio.Scanner, prompt string) (int, bool, error) {
 }
 
 func main() {
-	jsonStorage := storage.NewJSONStorage(todosFile)
-	store, err := todo.NewTodoStore(jsonStorage)
-	if err != nil {
-		fmt.Printf("Error loading todos: %v\n", err)
-		return
+	if err := godotenv.Load(); err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
 	}
-	var handler todo.TodoHandler = store
+
+	mongoURI := os.Getenv("MONGO_URI")
+	mongoDB := os.Getenv("MONGO_DB")
+	if mongoURI == "" || mongoDB == "" {
+		log.Fatal("MONGO_URI and MONGO_DB must be set in .env")
+	}
+
+	store, err := storage.NewMongoStorage(mongoURI, mongoDB)
+	if err != nil {
+		log.Fatalf("Error connecting to MongoDB: %v", err)
+	}
+	defer store.Close()
+	var handler todo.TodoStorage = store
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		if err := handler.Save(); err != nil {
-			fmt.Printf("\nError saving todos during shutdown: %v\n", err)
-			os.Exit(1)
-		}
+		store.Close()
 		os.Exit(0)
 	}()
 
@@ -104,20 +111,27 @@ func main() {
 			}
 			if desc == "" {
 				fmt.Println("Error: description cannot be empty.")
+			} else if err := handler.Add(desc); err != nil {
+				fmt.Printf("Error: %v\n", err)
 			} else {
-				handler.Add(desc)
-				if err := handler.Save(); err != nil {
-					fmt.Printf("Warning: failed to save todos: %v\n", err)
-				} else {
-					fmt.Println("Todo added successfully.")
-				}
+				fmt.Println("Todo added successfully.")
 			}
 
 		case 2: // List
-			printTodos(handler.List())
+			todos, err := handler.List()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				printTodos(todos)
+			}
 
 		case 3: // Delete
-			printTodos(handler.List())
+			todos, err := handler.List()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+			printTodos(todos)
 			id, ok, err := readID(scanner, "> Enter todo ID to delete: ")
 			if !ok {
 				return
@@ -126,14 +140,17 @@ func main() {
 				fmt.Printf("Error: %v\n", err)
 			} else if err := handler.Delete(id); err != nil {
 				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.Save(); err != nil {
-				fmt.Printf("Warning: failed to save todos: %v\n", err)
 			} else {
 				fmt.Println("Todo deleted successfully.")
 			}
 
 		case 4: // Mark as completed
-			printTodos(handler.List())
+			todos, err := handler.List()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+			printTodos(todos)
 			id, ok, err := readID(scanner, "> Enter todo ID to mark as completed: ")
 			if !ok {
 				return
@@ -142,14 +159,17 @@ func main() {
 				fmt.Printf("Error: %v\n", err)
 			} else if err := handler.SetCompleted(id); err != nil {
 				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.Save(); err != nil {
-				fmt.Printf("Warning: failed to save todos: %v\n", err)
 			} else {
 				fmt.Println("Todo marked as completed.")
 			}
 
 		case 5: // Mark as incomplete
-			printTodos(handler.List())
+			todos, err := handler.List()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+			printTodos(todos)
 			id, ok, err := readID(scanner, "> Enter todo ID to mark as incomplete: ")
 			if !ok {
 				return
@@ -158,14 +178,17 @@ func main() {
 				fmt.Printf("Error: %v\n", err)
 			} else if err := handler.SetIncomplete(id); err != nil {
 				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.Save(); err != nil {
-				fmt.Printf("Warning: failed to save todos: %v\n", err)
 			} else {
 				fmt.Println("Todo marked as incomplete.")
 			}
 
 		case 6: // Edit
-			printTodos(handler.List())
+			todos, err := handler.List()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+			printTodos(todos)
 			id, ok, err := readID(scanner, "> Enter todo ID to edit: ")
 			if !ok {
 				return
@@ -181,17 +204,12 @@ func main() {
 					fmt.Println("Error: description cannot be empty.")
 				} else if err := handler.Edit(id, desc); err != nil {
 					fmt.Printf("Error: %v\n", err)
-				} else if err := handler.Save(); err != nil {
-					fmt.Printf("Warning: failed to save todos: %v\n", err)
 				} else {
 					fmt.Println("Todo updated successfully.")
 				}
 			}
 
 		case 7: // Exit
-			if err := handler.Save(); err != nil {
-				fmt.Printf("Error saving todos: %v\n", err)
-			}
 			return
 		}
 	}
