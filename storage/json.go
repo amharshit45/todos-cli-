@@ -13,7 +13,7 @@ import (
 var _ todo.Storage = (*JSONStorage)(nil)
 
 type JSONStorage struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	filePath string
 	maxID    int
 }
@@ -109,8 +109,8 @@ func (js *JSONStorage) Add(_ context.Context, description string) error {
 }
 
 func (js *JSONStorage) List(_ context.Context) ([]todo.Todo, error) {
-	js.mu.Lock()
-	defer js.mu.Unlock()
+	js.mu.RLock()
+	defer js.mu.RUnlock()
 	return js.load()
 }
 

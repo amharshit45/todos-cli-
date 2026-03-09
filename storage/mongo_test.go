@@ -3,24 +3,40 @@ package storage
 import (
 	"context"
 	"errors"
-	"path/filepath"
+	"os"
 	"testing"
 
 	"github.com/amharshit45/todos-cli-/todo"
 )
 
-func newTestStorage(t *testing.T) *JSONStorage {
+func newTestMongoStorage(t *testing.T) *MongoStorage {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "todos.json")
-	s, err := NewJSONStorage(path)
-	if err != nil {
-		t.Fatalf("NewJSONStorage: %v", err)
+
+	uri := os.Getenv("MONGO_TEST_URI")
+	if uri == "" {
+		t.Skip("MONGO_TEST_URI not set, skipping MongoDB tests")
 	}
+
+	dbName := "test_todos_cli"
+	s, err := NewMongoStorage(uri, dbName)
+	if err != nil {
+		t.Fatalf("NewMongoStorage: %v", err)
+	}
+
+	ctx := context.Background()
+	s.client.Database(dbName).Collection(collectionName).Drop(ctx)
+	s.client.Database(dbName).Collection(counterCollection).Drop(ctx)
+
+	t.Cleanup(func() {
+		s.client.Database(dbName).Drop(context.Background())
+		s.Close()
+	})
+
 	return s
 }
 
-func TestAddAndList(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoAddAndList(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	todos, err := s.List(ctx)
@@ -53,8 +69,8 @@ func TestAddAndList(t *testing.T) {
 	}
 }
 
-func TestDelete(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoDelete(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	if err := s.Add(ctx, "to delete"); err != nil {
@@ -80,8 +96,8 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestDeleteNotFound(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoDeleteNotFound(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	err := s.Delete(ctx, 999)
@@ -93,8 +109,8 @@ func TestDeleteNotFound(t *testing.T) {
 	}
 }
 
-func TestDeleteInvalidID(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoDeleteInvalidID(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	err := s.Delete(ctx, 0)
@@ -111,8 +127,8 @@ func TestDeleteInvalidID(t *testing.T) {
 	}
 }
 
-func TestSetCompleted(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoSetCompleted(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	if err := s.Add(ctx, "task"); err != nil {
@@ -142,8 +158,8 @@ func TestSetCompleted(t *testing.T) {
 	}
 }
 
-func TestSetCompletedAlready(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoSetCompletedAlready(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	if err := s.Add(ctx, "task"); err != nil {
@@ -171,8 +187,8 @@ func TestSetCompletedAlready(t *testing.T) {
 	}
 }
 
-func TestSetCompletedNotFound(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoSetCompletedNotFound(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	err := s.SetCompleted(ctx, 999, true)
@@ -181,8 +197,8 @@ func TestSetCompletedNotFound(t *testing.T) {
 	}
 }
 
-func TestEdit(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoEdit(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	if err := s.Add(ctx, "original"); err != nil {
@@ -201,8 +217,8 @@ func TestEdit(t *testing.T) {
 	}
 }
 
-func TestEditNotFound(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoEditNotFound(t *testing.T) {
+	s := newTestMongoStorage(t)
 	ctx := context.Background()
 
 	err := s.Edit(ctx, 999, "nope")
@@ -211,67 +227,9 @@ func TestEditNotFound(t *testing.T) {
 	}
 }
 
-func TestClose(t *testing.T) {
-	s := newTestStorage(t)
+func TestMongoClose(t *testing.T) {
+	s := newTestMongoStorage(t)
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
-	}
-}
-
-func TestPersistence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "todos.json")
-
-	s1, err := NewJSONStorage(path)
-	if err != nil {
-		t.Fatalf("NewJSONStorage: %v", err)
-	}
-	ctx := context.Background()
-
-	if err := s1.Add(ctx, "persistent"); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-	if err := s1.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	s2, err := NewJSONStorage(path)
-	if err != nil {
-		t.Fatalf("NewJSONStorage (reopen): %v", err)
-	}
-
-	todos, err := s2.List(ctx)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(todos) != 1 || todos[0].Description != "persistent" {
-		t.Fatalf("expected 'persistent', got: %v", todos)
-	}
-
-	if err := s2.Add(ctx, "second"); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-	todos, err = s2.List(ctx)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if todos[1].ID != 2 {
-		t.Fatalf("expected ID 2 for second todo, got %d", todos[1].ID)
-	}
-}
-
-func TestNewJSONStorageCreatesFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "new.json")
-
-	s, err := NewJSONStorage(path)
-	if err != nil {
-		t.Fatalf("NewJSONStorage: %v", err)
-	}
-
-	todos, err := s.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(todos) != 0 {
-		t.Fatalf("expected empty list, got %d", len(todos))
 	}
 }

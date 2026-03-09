@@ -35,11 +35,13 @@ func NewMongoStorage(uri, dbName string) (*MongoStorage, error) {
 		return nil, fmt.Errorf("failed to connect to mongodb: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer pingCancel()
 
-	if err := client.Ping(ctx, readpref.Primary()); err != nil {
-		client.Disconnect(context.Background())
+	if err := client.Ping(pingCtx, readpref.Primary()); err != nil {
+		disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), defaultTimeout)
+		defer disconnectCancel()
+		client.Disconnect(disconnectCtx)
 		return nil, fmt.Errorf("failed to ping mongodb: %w", err)
 	}
 
@@ -73,21 +75,6 @@ func (ms *MongoStorage) nextID(ctx context.Context) (int, error) {
 	return result.Seq, nil
 }
 
-func (ms *MongoStorage) findByID(ctx context.Context, id int) (todo.Todo, error) {
-	if id <= 0 {
-		return todo.Todo{}, fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
-	}
-	var t todo.Todo
-	err := ms.coll().FindOne(ctx, bson.D{{Key: "id", Value: id}}).Decode(&t)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return t, fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
-		}
-		return t, fmt.Errorf("failed to find todo: %w", err)
-	}
-	return t, nil
-}
-
 func (ms *MongoStorage) Add(ctx context.Context, description string) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
@@ -108,7 +95,7 @@ func (ms *MongoStorage) List(ctx context.Context) ([]todo.Todo, error) {
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
 
-	cursor, err := ms.coll().Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+	cursor, err := ms.coll().Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to find todos: %w", err)
 	}
@@ -130,7 +117,7 @@ func (ms *MongoStorage) Delete(ctx context.Context, id int) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	result, err := ms.coll().DeleteOne(ctx, bson.D{{Key: "id", Value: id}})
+	result, err := ms.coll().DeleteOne(ctx, bson.D{{Key: "_id", Value: id}})
 	if err != nil {
 		return fmt.Errorf("failed to delete todo: %w", err)
 	}
@@ -148,20 +135,16 @@ func (ms *MongoStorage) SetCompleted(ctx context.Context, id int, completed bool
 	defer cancel()
 
 	result, err := ms.coll().UpdateOne(ctx,
-		bson.D{
-			{Key: "id", Value: id},
-			{Key: "completed", Value: !completed},
-		},
+		bson.D{{Key: "_id", Value: id}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "completed", Value: completed}}}},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
 	if result.MatchedCount == 0 {
-		_, err := ms.findByID(ctx, id)
-		if err != nil {
-			return err
-		}
+		return fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
+	}
+	if result.ModifiedCount == 0 {
 		if completed {
 			return fmt.Errorf("todo %d: %w", id, todo.ErrAlreadyCompleted)
 		}
@@ -178,7 +161,7 @@ func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) er
 	defer cancel()
 
 	result, err := ms.coll().UpdateOne(ctx,
-		bson.D{{Key: "id", Value: id}},
+		bson.D{{Key: "_id", Value: id}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "description", Value: description}}}},
 	)
 	if err != nil {
@@ -193,7 +176,9 @@ func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) er
 func (ms *MongoStorage) Close() error {
 	var err error
 	ms.closeOnce.Do(func() {
-		err = ms.client.Disconnect(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+		defer cancel()
+		err = ms.client.Disconnect(ctx)
 	})
 	return err
 }
