@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/amharshit45/todos-cli-/todo"
 )
+
+var _ todo.Storage = (*JSONStorage)(nil)
 
 type JSONStorage struct {
 	mu       sync.Mutex
@@ -91,7 +94,7 @@ func (js *JSONStorage) findByID(todos []todo.Todo, id int) (int, error) {
 	return -1, fmt.Errorf("todo with id %d not found", id)
 }
 
-func (js *JSONStorage) Add(description string) error {
+func (js *JSONStorage) Add(_ context.Context, description string) error {
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -105,13 +108,13 @@ func (js *JSONStorage) Add(description string) error {
 	return js.save(todos)
 }
 
-func (js *JSONStorage) List() ([]todo.Todo, error) {
+func (js *JSONStorage) List(_ context.Context) ([]todo.Todo, error) {
 	js.mu.Lock()
 	defer js.mu.Unlock()
 	return js.load()
 }
 
-func (js *JSONStorage) Delete(id int) error {
+func (js *JSONStorage) Delete(_ context.Context, id int) error {
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -127,7 +130,7 @@ func (js *JSONStorage) Delete(id int) error {
 	return js.save(todos)
 }
 
-func (js *JSONStorage) SetCompleted(id int) error {
+func (js *JSONStorage) SetCompleted(_ context.Context, id int, completed bool) error {
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -139,33 +142,17 @@ func (js *JSONStorage) SetCompleted(id int) error {
 	if err != nil {
 		return err
 	}
-	if todos[idx].Completed {
-		return fmt.Errorf("todo %d is already completed", id)
-	}
-	todos[idx].Completed = true
-	return js.save(todos)
-}
-
-func (js *JSONStorage) SetIncomplete(id int) error {
-	js.mu.Lock()
-	defer js.mu.Unlock()
-
-	todos, err := js.load()
-	if err != nil {
-		return err
-	}
-	idx, err := js.findByID(todos, id)
-	if err != nil {
-		return err
-	}
-	if !todos[idx].Completed {
+	if todos[idx].Completed == completed {
+		if completed {
+			return fmt.Errorf("todo %d is already completed", id)
+		}
 		return fmt.Errorf("todo %d is already incomplete", id)
 	}
-	todos[idx].Completed = false
+	todos[idx].Completed = completed
 	return js.save(todos)
 }
 
-func (js *JSONStorage) Edit(id int, description string) error {
+func (js *JSONStorage) Edit(_ context.Context, id int, description string) error {
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -179,8 +166,4 @@ func (js *JSONStorage) Edit(id int, description string) error {
 	}
 	todos[idx].Description = description
 	return js.save(todos)
-}
-
-func (js *JSONStorage) Close() error {
-	return nil
 }

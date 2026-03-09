@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -78,7 +79,9 @@ func main() {
 		log.Fatalf("Error connecting to MongoDB: %v", err)
 	}
 	defer store.Close()
-	var handler todo.TodoStorage = store
+
+	var handler todo.Storage = store
+	ctx := context.Background()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -111,14 +114,14 @@ func main() {
 			}
 			if desc == "" {
 				fmt.Println("Error: description cannot be empty.")
-			} else if err := handler.Add(desc); err != nil {
+			} else if err := handler.Add(ctx, desc); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			} else {
 				fmt.Println("Todo added successfully.")
 			}
 
 		case 2: // List
-			todos, err := handler.List()
+			todos, err := handler.List(ctx)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 			} else {
@@ -126,7 +129,7 @@ func main() {
 			}
 
 		case 3: // Delete
-			todos, err := handler.List()
+			todos, err := handler.List(ctx)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 				continue
@@ -138,14 +141,14 @@ func main() {
 			}
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.Delete(id); err != nil {
+			} else if err := handler.Delete(ctx, id); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			} else {
 				fmt.Println("Todo deleted successfully.")
 			}
 
 		case 4: // Mark as completed
-			todos, err := handler.List()
+			todos, err := handler.List(ctx)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 				continue
@@ -157,14 +160,14 @@ func main() {
 			}
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.SetCompleted(id); err != nil {
+			} else if err := handler.SetCompleted(ctx, id, true); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			} else {
 				fmt.Println("Todo marked as completed.")
 			}
 
 		case 5: // Mark as incomplete
-			todos, err := handler.List()
+			todos, err := handler.List(ctx)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 				continue
@@ -176,14 +179,14 @@ func main() {
 			}
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.SetIncomplete(id); err != nil {
+			} else if err := handler.SetCompleted(ctx, id, false); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			} else {
 				fmt.Println("Todo marked as incomplete.")
 			}
 
 		case 6: // Edit
-			todos, err := handler.List()
+			todos, err := handler.List(ctx)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 				continue
@@ -202,7 +205,7 @@ func main() {
 				}
 				if desc == "" {
 					fmt.Println("Error: description cannot be empty.")
-				} else if err := handler.Edit(id, desc); err != nil {
+				} else if err := handler.Edit(ctx, id, desc); err != nil {
 					fmt.Printf("Error: %v\n", err)
 				} else {
 					fmt.Println("Todo updated successfully.")

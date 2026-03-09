@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -13,11 +14,19 @@ import (
 	"github.com/amharshit45/todos-cli-/todo"
 )
 
-const collectionName = "todos"
+const (
+	collectionName    = "todos"
+	counterCollection = "counters"
+	defaultTimeout    = 5 * time.Second
+	listTimeout       = 10 * time.Second
+)
+
+var _ todo.Storage = (*MongoStorage)(nil)
 
 type MongoStorage struct {
-	client *mongo.Client
-	dbName string
+	client    *mongo.Client
+	dbName    string
+	closeOnce sync.Once
 }
 
 func NewMongoStorage(uri, dbName string) (*MongoStorage, error) {
@@ -26,7 +35,7 @@ func NewMongoStorage(uri, dbName string) (*MongoStorage, error) {
 		return nil, fmt.Errorf("failed to connect to mongodb: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if err := client.Ping(ctx, readpref.Primary()); err != nil {
@@ -42,16 +51,26 @@ func (ms *MongoStorage) coll() *mongo.Collection {
 }
 
 func (ms *MongoStorage) nextID(ctx context.Context) (int, error) {
-	opts := options.FindOne().SetSort(bson.D{{Key: "id", Value: -1}})
-	var t todo.Todo
-	err := ms.coll().FindOne(ctx, bson.D{}, opts).Decode(&t)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return 1, nil
-		}
-		return 0, fmt.Errorf("failed to determine next id: %w", err)
+	type counter struct {
+		Seq int `bson:"seq"`
 	}
-	return t.ID + 1, nil
+
+	var result counter
+	opts := options.FindOneAndUpdate().
+		SetUpsert(true).
+		SetReturnDocument(options.After)
+
+	err := ms.client.Database(ms.dbName).Collection(counterCollection).
+		FindOneAndUpdate(ctx,
+			bson.D{{Key: "_id", Value: collectionName}},
+			bson.D{{Key: "$inc", Value: bson.D{{Key: "seq", Value: 1}}}},
+			opts,
+		).Decode(&result)
+	if err != nil {
+		return 0, fmt.Errorf("failed to generate next id: %w", err)
+	}
+
+	return result.Seq, nil
 }
 
 func (ms *MongoStorage) findByID(ctx context.Context, id int) (todo.Todo, error) {
@@ -66,8 +85,8 @@ func (ms *MongoStorage) findByID(ctx context.Context, id int) (todo.Todo, error)
 	return t, nil
 }
 
-func (ms *MongoStorage) Add(description string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (ms *MongoStorage) Add(ctx context.Context, description string) error {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
 	id, err := ms.nextID(ctx)
@@ -82,8 +101,8 @@ func (ms *MongoStorage) Add(description string) error {
 	return nil
 }
 
-func (ms *MongoStorage) List() ([]todo.Todo, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (ms *MongoStorage) List(ctx context.Context) ([]todo.Todo, error) {
+	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
 
 	cursor, err := ms.coll().Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
@@ -101,8 +120,8 @@ func (ms *MongoStorage) List() ([]todo.Todo, error) {
 	return todos, nil
 }
 
-func (ms *MongoStorage) Delete(id int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (ms *MongoStorage) Delete(ctx context.Context, id int) error {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
 	result, err := ms.coll().DeleteOne(ctx, bson.D{{Key: "id", Value: id}})
@@ -115,52 +134,35 @@ func (ms *MongoStorage) Delete(id int) error {
 	return nil
 }
 
-func (ms *MongoStorage) SetCompleted(id int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (ms *MongoStorage) SetCompleted(ctx context.Context, id int, completed bool) error {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	t, err := ms.findByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if t.Completed {
-		return fmt.Errorf("todo %d is already completed", id)
-	}
-
-	_, err = ms.coll().UpdateOne(ctx,
-		bson.D{{Key: "id", Value: id}},
-		bson.D{{Key: "$set", Value: bson.D{{Key: "completed", Value: true}}}},
+	result, err := ms.coll().UpdateOne(ctx,
+		bson.D{
+			{Key: "id", Value: id},
+			{Key: "completed", Value: !completed},
+		},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "completed", Value: completed}}}},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
-	return nil
-}
-
-func (ms *MongoStorage) SetIncomplete(id int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	t, err := ms.findByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !t.Completed {
+	if result.MatchedCount == 0 {
+		_, err := ms.findByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if completed {
+			return fmt.Errorf("todo %d is already completed", id)
+		}
 		return fmt.Errorf("todo %d is already incomplete", id)
 	}
-
-	_, err = ms.coll().UpdateOne(ctx,
-		bson.D{{Key: "id", Value: id}},
-		bson.D{{Key: "$set", Value: bson.D{{Key: "completed", Value: false}}}},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update todo: %w", err)
-	}
 	return nil
 }
 
-func (ms *MongoStorage) Edit(id int, description string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) error {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
 	result, err := ms.coll().UpdateOne(ctx,
@@ -177,5 +179,9 @@ func (ms *MongoStorage) Edit(id int, description string) error {
 }
 
 func (ms *MongoStorage) Close() error {
-	return ms.client.Disconnect(context.Background())
+	var err error
+	ms.closeOnce.Do(func() {
+		err = ms.client.Disconnect(context.Background())
+	})
+	return err
 }
