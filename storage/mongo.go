@@ -74,11 +74,14 @@ func (ms *MongoStorage) nextID(ctx context.Context) (int, error) {
 }
 
 func (ms *MongoStorage) findByID(ctx context.Context, id int) (todo.Todo, error) {
+	if id <= 0 {
+		return todo.Todo{}, fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	}
 	var t todo.Todo
 	err := ms.coll().FindOne(ctx, bson.D{{Key: "id", Value: id}}).Decode(&t)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return t, fmt.Errorf("todo with id %d not found", id)
+			return t, fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
 		}
 		return t, fmt.Errorf("failed to find todo: %w", err)
 	}
@@ -121,6 +124,9 @@ func (ms *MongoStorage) List(ctx context.Context) ([]todo.Todo, error) {
 }
 
 func (ms *MongoStorage) Delete(ctx context.Context, id int) error {
+	if id <= 0 {
+		return fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	}
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
@@ -129,12 +135,15 @@ func (ms *MongoStorage) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("failed to delete todo: %w", err)
 	}
 	if result.DeletedCount == 0 {
-		return fmt.Errorf("todo with id %d not found", id)
+		return fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
 	}
 	return nil
 }
 
 func (ms *MongoStorage) SetCompleted(ctx context.Context, id int, completed bool) error {
+	if id <= 0 {
+		return fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	}
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
@@ -154,14 +163,17 @@ func (ms *MongoStorage) SetCompleted(ctx context.Context, id int, completed bool
 			return err
 		}
 		if completed {
-			return fmt.Errorf("todo %d is already completed", id)
+			return fmt.Errorf("todo %d: %w", id, todo.ErrAlreadyCompleted)
 		}
-		return fmt.Errorf("todo %d is already incomplete", id)
+		return fmt.Errorf("todo %d: %w", id, todo.ErrAlreadyIncomplete)
 	}
 	return nil
 }
 
 func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) error {
+	if id <= 0 {
+		return fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	}
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
@@ -173,7 +185,7 @@ func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) er
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("todo with id %d not found", id)
+		return fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
 	}
 	return nil
 }

@@ -17,6 +17,8 @@ import (
 	"github.com/amharshit45/todos-cli-/todo"
 )
 
+const menuOptions = 7
+
 func printMenu() {
 	fmt.Println("===== Todo CLI =====")
 	fmt.Println("1. Add a todo")
@@ -63,6 +65,106 @@ func readID(scanner *bufio.Scanner, prompt string) (int, bool, error) {
 	return id, true, nil
 }
 
+// listAndPromptID lists all todos, prints them, and prompts for an ID selection.
+// ok=false means the scanner hit EOF and the caller should exit.
+func listAndPromptID(ctx context.Context, store todo.Storage, scanner *bufio.Scanner, prompt string) (int, bool, error) {
+	todos, err := store.List(ctx)
+	if err != nil {
+		return 0, true, err
+	}
+	printTodos(todos)
+	return readID(scanner, prompt)
+}
+
+func handleAdd(ctx context.Context, store todo.Storage, scanner *bufio.Scanner) bool {
+	desc, ok := readLine(scanner, "> Enter description: ")
+	if !ok {
+		return false
+	}
+	if desc == "" {
+		fmt.Println("Error: description cannot be empty.")
+		return true
+	}
+	if err := store.Add(ctx, desc); err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		fmt.Println("Todo added successfully.")
+	}
+	return true
+}
+
+func handleList(ctx context.Context, store todo.Storage) {
+	todos, err := store.List(ctx)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	printTodos(todos)
+}
+
+func handleDelete(ctx context.Context, store todo.Storage, scanner *bufio.Scanner) bool {
+	id, ok, err := listAndPromptID(ctx, store, scanner, "> Enter todo ID to delete: ")
+	if !ok {
+		return false
+	}
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return true
+	}
+	if err := store.Delete(ctx, id); err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		fmt.Println("Todo deleted successfully.")
+	}
+	return true
+}
+
+func handleSetCompleted(ctx context.Context, store todo.Storage, scanner *bufio.Scanner, completed bool) bool {
+	action := "completed"
+	if !completed {
+		action = "incomplete"
+	}
+	id, ok, err := listAndPromptID(ctx, store, scanner, fmt.Sprintf("> Enter todo ID to mark as %s: ", action))
+	if !ok {
+		return false
+	}
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return true
+	}
+	if err := store.SetCompleted(ctx, id, completed); err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		fmt.Printf("Todo marked as %s.\n", action)
+	}
+	return true
+}
+
+func handleEdit(ctx context.Context, store todo.Storage, scanner *bufio.Scanner) bool {
+	id, ok, err := listAndPromptID(ctx, store, scanner, "> Enter todo ID to edit: ")
+	if !ok {
+		return false
+	}
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return true
+	}
+	desc, ok := readLine(scanner, "> Enter new description: ")
+	if !ok {
+		return false
+	}
+	if desc == "" {
+		fmt.Println("Error: description cannot be empty.")
+		return true
+	}
+	if err := store.Edit(ctx, id, desc); err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		fmt.Println("Todo updated successfully.")
+	}
+	return true
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatalf("Error loading .env file: %v", err)
@@ -80,15 +182,12 @@ func main() {
 	}
 	defer store.Close()
 
-	var handler todo.Storage = store
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-sigChan
-		store.Close()
-		os.Exit(0)
+		<-ctx.Done()
+		os.Stdin.Close()
 	}()
 
 	printMenu()
@@ -101,118 +200,35 @@ func main() {
 		}
 
 		option, err := strconv.Atoi(choice)
-		if err != nil || option < 1 || option > 7 {
-			fmt.Println("Error: please enter a number between 1 and 7.")
+		if err != nil || option < 1 || option > menuOptions {
+			fmt.Printf("Error: please enter a number between 1 and %d.\n", menuOptions)
 			continue
 		}
 
 		switch option {
-		case 1: // Add
-			desc, ok := readLine(scanner, "> Enter description: ")
-			if !ok {
+		case 1:
+			if !handleAdd(ctx, store, scanner) {
 				return
 			}
-			if desc == "" {
-				fmt.Println("Error: description cannot be empty.")
-			} else if err := handler.Add(ctx, desc); err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo added successfully.")
-			}
-
-		case 2: // List
-			todos, err := handler.List(ctx)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				printTodos(todos)
-			}
-
-		case 3: // Delete
-			todos, err := handler.List(ctx)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				continue
-			}
-			printTodos(todos)
-			id, ok, err := readID(scanner, "> Enter todo ID to delete: ")
-			if !ok {
+		case 2:
+			handleList(ctx, store)
+		case 3:
+			if !handleDelete(ctx, store, scanner) {
 				return
 			}
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.Delete(ctx, id); err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo deleted successfully.")
-			}
-
-		case 4: // Mark as completed
-			todos, err := handler.List(ctx)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				continue
-			}
-			printTodos(todos)
-			id, ok, err := readID(scanner, "> Enter todo ID to mark as completed: ")
-			if !ok {
+		case 4:
+			if !handleSetCompleted(ctx, store, scanner, true) {
 				return
 			}
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.SetCompleted(ctx, id, true); err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo marked as completed.")
-			}
-
-		case 5: // Mark as incomplete
-			todos, err := handler.List(ctx)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				continue
-			}
-			printTodos(todos)
-			id, ok, err := readID(scanner, "> Enter todo ID to mark as incomplete: ")
-			if !ok {
+		case 5:
+			if !handleSetCompleted(ctx, store, scanner, false) {
 				return
 			}
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else if err := handler.SetCompleted(ctx, id, false); err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Println("Todo marked as incomplete.")
-			}
-
-		case 6: // Edit
-			todos, err := handler.List(ctx)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				continue
-			}
-			printTodos(todos)
-			id, ok, err := readID(scanner, "> Enter todo ID to edit: ")
-			if !ok {
+		case 6:
+			if !handleEdit(ctx, store, scanner) {
 				return
 			}
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				desc, ok := readLine(scanner, "> Enter new description: ")
-				if !ok {
-					return
-				}
-				if desc == "" {
-					fmt.Println("Error: description cannot be empty.")
-				} else if err := handler.Edit(ctx, id, desc); err != nil {
-					fmt.Printf("Error: %v\n", err)
-				} else {
-					fmt.Println("Todo updated successfully.")
-				}
-			}
-
-		case 7: // Exit
+		case 7:
 			return
 		}
 	}

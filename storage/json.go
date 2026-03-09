@@ -84,14 +84,14 @@ func (js *JSONStorage) save(todos []todo.Todo) error {
 
 func (js *JSONStorage) findByID(todos []todo.Todo, id int) (int, error) {
 	if id <= 0 {
-		return -1, fmt.Errorf("invalid id: %d", id)
+		return -1, fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
 	}
 	for i := range todos {
 		if todos[i].ID == id {
 			return i, nil
 		}
 	}
-	return -1, fmt.Errorf("todo with id %d not found", id)
+	return -1, fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
 }
 
 func (js *JSONStorage) Add(_ context.Context, description string) error {
@@ -144,9 +144,9 @@ func (js *JSONStorage) SetCompleted(_ context.Context, id int, completed bool) e
 	}
 	if todos[idx].Completed == completed {
 		if completed {
-			return fmt.Errorf("todo %d is already completed", id)
+			return fmt.Errorf("todo %d: %w", id, todo.ErrAlreadyCompleted)
 		}
-		return fmt.Errorf("todo %d is already incomplete", id)
+		return fmt.Errorf("todo %d: %w", id, todo.ErrAlreadyIncomplete)
 	}
 	todos[idx].Completed = completed
 	return js.save(todos)
@@ -166,4 +166,8 @@ func (js *JSONStorage) Edit(_ context.Context, id int, description string) error
 	}
 	todos[idx].Description = description
 	return js.save(todos)
+}
+
+func (js *JSONStorage) Close() error {
+	return nil
 }
