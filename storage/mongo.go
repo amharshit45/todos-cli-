@@ -89,9 +89,20 @@ func (ms *MongoStorage) Add(ctx context.Context, description string) error {
 
 	newTodo := todo.Todo{ID: id, Description: description}
 	if _, err := ms.coll().InsertOne(opCtx, newTodo); err != nil {
+		ms.rollbackID(opCtx)
 		return fmt.Errorf("failed to insert todo: %w", err)
 	}
 	return nil
+}
+
+// rollbackID decrements the counter sequence on a best-effort basis when
+// InsertOne fails after nextID succeeds, preventing gaps in the ID sequence.
+func (ms *MongoStorage) rollbackID(ctx context.Context) {
+	ms.client.Database(ms.dbName).Collection(counterCollection).
+		FindOneAndUpdate(ctx,
+			bson.D{{Key: "_id", Value: collectionName}},
+			bson.D{{Key: "$inc", Value: bson.D{{Key: "seq", Value: -1}}}},
+		)
 }
 
 func (ms *MongoStorage) List(ctx context.Context) ([]todo.Todo, error) {
@@ -179,11 +190,9 @@ func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) er
 	return nil
 }
 
-func (ms *MongoStorage) Close() error {
+func (ms *MongoStorage) Close(ctx context.Context) error {
 	var err error
 	ms.closeOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-		defer cancel()
 		err = ms.client.Disconnect(ctx)
 	})
 	return err

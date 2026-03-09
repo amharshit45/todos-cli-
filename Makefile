@@ -1,7 +1,7 @@
 APP_NAME := todos-cli
 BINARY_DIR := bin
 
-.PHONY: build run test clean
+.PHONY: build run test vet clean
 
 build:
 	go build -o $(BINARY_DIR)/$(APP_NAME)
@@ -11,6 +11,9 @@ run:
 
 test:
 	go test ./...
+
+vet:
+	go vet ./...
 
 clean:
 	rm -rf $(BINARY_DIR)

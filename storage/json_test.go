@@ -213,7 +213,7 @@ func TestEditNotFound(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	s := newTestStorage(t)
-	if err := s.Close(); err != nil {
+	if err := s.Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 }
@@ -230,7 +230,7 @@ func TestPersistence(t *testing.T) {
 	if err := s1.Add(ctx, "persistent"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := s1.Close(); err != nil {
+	if err := s1.Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 

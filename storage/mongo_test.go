@@ -29,7 +29,7 @@ func newTestMongoStorage(t *testing.T) *MongoStorage {
 
 	t.Cleanup(func() {
 		s.client.Database(dbName).Drop(context.Background())
-		s.Close()
+		s.Close(context.Background())
 	})
 
 	return s
@@ -229,7 +229,7 @@ func TestMongoEditNotFound(t *testing.T) {
 
 func TestMongoClose(t *testing.T) {
 	s := newTestMongoStorage(t)
-	if err := s.Close(); err != nil {
+	if err := s.Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 }

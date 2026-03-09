@@ -189,6 +189,6 @@ func (js *JSONStorage) Edit(ctx context.Context, id int, description string) err
 	return js.save(todos)
 }
 
-func (js *JSONStorage) Close() error {
+func (js *JSONStorage) Close(_ context.Context) error {
 	return nil
 }

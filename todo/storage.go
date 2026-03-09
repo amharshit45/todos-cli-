@@ -8,5 +8,5 @@ type Storage interface {
 	Delete(ctx context.Context, id int) error
 	SetCompleted(ctx context.Context, id int, completed bool) error
 	Edit(ctx context.Context, id int, description string) error
-	Close() error
+	Close(ctx context.Context) error
 }

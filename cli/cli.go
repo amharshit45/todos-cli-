@@ -20,55 +20,52 @@ var errExit = errors.New("exit requested")
 
 type menuItem struct {
 	label   string
-	handler func() error
+	handler func(ctx context.Context) error
 }
 
 type App struct {
-	store    todo.Storage
-	ctx      context.Context
-	menu     []menuItem
-	lines    chan string
-	scanDone chan struct{}
-	scanErr  error
+	store   todo.Storage
+	scanner *bufio.Scanner
+	menu    []menuItem
+	lines   chan string
+	scanErr error
 }
 
-func New(ctx context.Context, store todo.Storage, scanner *bufio.Scanner) *App {
+func New(store todo.Storage, scanner *bufio.Scanner) *App {
 	app := &App{
-		store:    store,
-		ctx:      ctx,
-		lines:    make(chan string),
-		scanDone: make(chan struct{}),
+		store:   store,
+		scanner: scanner,
+		lines:   make(chan string),
 	}
 	app.menu = []menuItem{
 		{"Add a todo", app.handleAdd},
 		{"List todos", app.handleList},
 		{"Delete a todo", app.handleDelete},
-		{"Mark as completed", func() error { return app.handleSetCompleted(true) }},
-		{"Mark as incomplete", func() error { return app.handleSetCompleted(false) }},
+		{"Mark as completed", func(ctx context.Context) error { return app.handleSetCompleted(ctx, true) }},
+		{"Mark as incomplete", func(ctx context.Context) error { return app.handleSetCompleted(ctx, false) }},
 		{"Edit a todo", app.handleEdit},
-		{"Exit", func() error { return errExit }},
+		{"Exit", func(context.Context) error { return errExit }},
 	}
-	go app.readInput(scanner)
 	return app
 }
 
-func (a *App) readInput(scanner *bufio.Scanner) {
-	defer close(a.scanDone)
+func (a *App) readInput(ctx context.Context) {
 	defer close(a.lines)
-	for scanner.Scan() {
+	for a.scanner.Scan() {
 		select {
-		case a.lines <- scanner.Text():
-		case <-a.ctx.Done():
+		case a.lines <- a.scanner.Text():
+		case <-ctx.Done():
 			return
 		}
 	}
-	a.scanErr = scanner.Err()
+	a.scanErr = a.scanner.Err()
 }
 
-func (a *App) Run() error {
+func (a *App) Run(ctx context.Context) error {
+	go a.readInput(ctx)
 	a.printMenu()
 	for {
-		choice, err := a.readLine("> Choose an option: ")
+		choice, err := a.readLine(ctx, "> Choose an option: ")
 		if err != nil {
 			if errors.Is(err, errExit) {
 				return nil
@@ -80,7 +77,7 @@ func (a *App) Run() error {
 			fmt.Printf("Error: please enter a number between 1 and %d.\n", len(a.menu))
 			continue
 		}
-		if err := a.menu[option-1].handler(); err != nil {
+		if err := a.menu[option-1].handler(ctx); err != nil {
 			if errors.Is(err, errExit) {
 				return nil
 			}
@@ -111,10 +108,10 @@ func printTodos(todos []todo.Todo) {
 	}
 }
 
-func (a *App) readLine(prompt string) (string, error) {
+func (a *App) readLine(ctx context.Context, prompt string) (string, error) {
 	fmt.Print(prompt)
 	select {
-	case <-a.ctx.Done():
+	case <-ctx.Done():
 		return "", errExit
 	case line, ok := <-a.lines:
 		if !ok {
@@ -127,37 +124,34 @@ func (a *App) readLine(prompt string) (string, error) {
 	}
 }
 
-func (a *App) readID(prompt string) (int, error) {
-	input, err := a.readLine(prompt)
+func (a *App) readID(ctx context.Context, prompt string) (int, error) {
+	input, err := a.readLine(ctx, prompt)
 	if err != nil {
 		return 0, err
 	}
 	id, parseErr := strconv.Atoi(input)
 	if parseErr != nil {
-		return 0, fmt.Errorf("invalid ID: '%s' is not a number", input)
+		return 0, fmt.Errorf("invalid ID %q: %w", input, parseErr)
 	}
 	return id, nil
 }
 
-func (a *App) listAndPromptID(prompt string) (int, error) {
-	todos, err := a.store.List(a.ctx)
+func (a *App) listAndPromptID(ctx context.Context, prompt string) (int, error) {
+	todos, err := a.store.List(ctx)
 	if err != nil {
 		return 0, err
 	}
 	printTodos(todos)
-	return a.readID(prompt)
+	return a.readID(ctx, prompt)
 }
 
-func (a *App) readDescription(prompt string) (string, error) {
-	desc, err := a.readLine(prompt)
+func (a *App) readDescription(ctx context.Context, prompt string) (string, error) {
+	desc, err := a.readLine(ctx, prompt)
 	if err != nil {
 		return "", err
 	}
-	if desc == "" {
-		return "", fmt.Errorf("description cannot be empty")
-	}
-	if len(desc) > todo.MaxDescriptionLength {
-		return "", fmt.Errorf("description exceeds maximum length of %d characters", todo.MaxDescriptionLength)
+	if err := todo.ValidateDescription(desc); err != nil {
+		return "", err
 	}
 	return desc, nil
 }
@@ -170,20 +164,20 @@ func (a *App) handleErr(err error) error {
 	return nil
 }
 
-func (a *App) handleAdd() error {
-	desc, err := a.readDescription("> Enter description: ")
+func (a *App) handleAdd(ctx context.Context) error {
+	desc, err := a.readDescription(ctx, "> Enter description: ")
 	if err != nil {
 		return a.handleErr(err)
 	}
-	if err := a.store.Add(a.ctx, desc); err != nil {
+	if err := a.store.Add(ctx, desc); err != nil {
 		return a.handleErr(err)
 	}
 	fmt.Println("Todo added successfully.")
 	return nil
 }
 
-func (a *App) handleList() error {
-	todos, err := a.store.List(a.ctx)
+func (a *App) handleList(ctx context.Context) error {
+	todos, err := a.store.List(ctx)
 	if err != nil {
 		return a.handleErr(err)
 	}
@@ -191,44 +185,44 @@ func (a *App) handleList() error {
 	return nil
 }
 
-func (a *App) handleDelete() error {
-	id, err := a.listAndPromptID("> Enter todo ID to delete: ")
+func (a *App) handleDelete(ctx context.Context) error {
+	id, err := a.listAndPromptID(ctx, "> Enter todo ID to delete: ")
 	if err != nil {
 		return a.handleErr(err)
 	}
-	if err := a.store.Delete(a.ctx, id); err != nil {
+	if err := a.store.Delete(ctx, id); err != nil {
 		return a.handleErr(err)
 	}
 	fmt.Println("Todo deleted successfully.")
 	return nil
 }
 
-func (a *App) handleSetCompleted(completed bool) error {
+func (a *App) handleSetCompleted(ctx context.Context, completed bool) error {
 	action := "completed"
 	if !completed {
 		action = "incomplete"
 	}
-	id, err := a.listAndPromptID(fmt.Sprintf("> Enter todo ID to mark as %s: ", action))
+	id, err := a.listAndPromptID(ctx, fmt.Sprintf("> Enter todo ID to mark as %s: ", action))
 	if err != nil {
 		return a.handleErr(err)
 	}
-	if err := a.store.SetCompleted(a.ctx, id, completed); err != nil {
+	if err := a.store.SetCompleted(ctx, id, completed); err != nil {
 		return a.handleErr(err)
 	}
 	fmt.Printf("Todo marked as %s.\n", action)
 	return nil
 }
 
-func (a *App) handleEdit() error {
-	id, err := a.listAndPromptID("> Enter todo ID to edit: ")
+func (a *App) handleEdit(ctx context.Context) error {
+	id, err := a.listAndPromptID(ctx, "> Enter todo ID to edit: ")
 	if err != nil {
 		return a.handleErr(err)
 	}
-	desc, err := a.readDescription("> Enter new description: ")
+	desc, err := a.readDescription(ctx, "> Enter new description: ")
 	if err != nil {
 		return a.handleErr(err)
 	}
-	if err := a.store.Edit(a.ctx, id, desc); err != nil {
+	if err := a.store.Edit(ctx, id, desc); err != nil {
 		return a.handleErr(err)
 	}
 	fmt.Println("Todo updated successfully.")

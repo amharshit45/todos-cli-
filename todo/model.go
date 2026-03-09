@@ -1,6 +1,9 @@
 package todo
 
-import "fmt"
+import (
+	"fmt"
+	"unicode/utf8"
+)
 
 const MaxDescriptionLength = 500
 
@@ -21,8 +24,8 @@ func ValidateDescription(desc string) error {
 	if desc == "" {
 		return ErrEmptyDescription
 	}
-	if len(desc) > MaxDescriptionLength {
-		return fmt.Errorf("%w: %d characters (max %d)", ErrDescriptionTooLong, len(desc), MaxDescriptionLength)
+	if n := utf8.RuneCountInString(desc); n > MaxDescriptionLength {
+		return fmt.Errorf("%w: %d characters (max %d)", ErrDescriptionTooLong, n, MaxDescriptionLength)
 	}
 	return nil
 }

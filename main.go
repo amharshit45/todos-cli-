@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -30,12 +31,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error connecting to MongoDB: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := store.Close(closeCtx); err != nil {
+			log.Printf("Error closing storage: %v", err)
+		}
+	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
-	app := cli.New(ctx, store, scanner)
+	app := cli.New(store, scanner)
 
-	if err := app.Run(); err != nil {
+	if err := app.Run(ctx); err != nil {
 		log.Fatalf("Error: %v", err)
 	}
 }
