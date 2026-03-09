@@ -29,13 +29,13 @@ type MongoStorage struct {
 	closeOnce sync.Once
 }
 
-func NewMongoStorage(uri, dbName string) (*MongoStorage, error) {
+func NewMongoStorage(ctx context.Context, uri, dbName string) (*MongoStorage, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to mongodb: %w", err)
 	}
 
-	pingCtx, pingCancel := context.WithTimeout(context.Background(), defaultTimeout)
+	pingCtx, pingCancel := context.WithTimeout(ctx, defaultTimeout)
 	defer pingCancel()
 
 	if err := client.Ping(pingCtx, readpref.Primary()); err != nil {
@@ -76,32 +76,35 @@ func (ms *MongoStorage) nextID(ctx context.Context) (int, error) {
 }
 
 func (ms *MongoStorage) Add(ctx context.Context, description string) error {
-	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	if err := todo.ValidateDescription(description); err != nil {
+		return err
+	}
+	opCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	id, err := ms.nextID(ctx)
+	id, err := ms.nextID(opCtx)
 	if err != nil {
 		return err
 	}
 
 	newTodo := todo.Todo{ID: id, Description: description}
-	if _, err := ms.coll().InsertOne(ctx, newTodo); err != nil {
+	if _, err := ms.coll().InsertOne(opCtx, newTodo); err != nil {
 		return fmt.Errorf("failed to insert todo: %w", err)
 	}
 	return nil
 }
 
 func (ms *MongoStorage) List(ctx context.Context) ([]todo.Todo, error) {
-	ctx, cancel := context.WithTimeout(ctx, listTimeout)
+	opCtx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
 
-	cursor, err := ms.coll().Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	cursor, err := ms.coll().Find(opCtx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to find todos: %w", err)
 	}
 
 	var todos []todo.Todo
-	if err := cursor.All(ctx, &todos); err != nil {
+	if err := cursor.All(opCtx, &todos); err != nil {
 		return nil, fmt.Errorf("failed to decode todos: %w", err)
 	}
 	if todos == nil {
@@ -111,13 +114,13 @@ func (ms *MongoStorage) List(ctx context.Context) ([]todo.Todo, error) {
 }
 
 func (ms *MongoStorage) Delete(ctx context.Context, id int) error {
-	if id <= 0 {
-		return fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	if err := todo.ValidateID(id); err != nil {
+		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	opCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	result, err := ms.coll().DeleteOne(ctx, bson.D{{Key: "_id", Value: id}})
+	result, err := ms.coll().DeleteOne(opCtx, bson.D{{Key: "_id", Value: id}})
 	if err != nil {
 		return fmt.Errorf("failed to delete todo: %w", err)
 	}
@@ -128,13 +131,13 @@ func (ms *MongoStorage) Delete(ctx context.Context, id int) error {
 }
 
 func (ms *MongoStorage) SetCompleted(ctx context.Context, id int, completed bool) error {
-	if id <= 0 {
-		return fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	if err := todo.ValidateID(id); err != nil {
+		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	opCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	result, err := ms.coll().UpdateOne(ctx,
+	result, err := ms.coll().UpdateOne(opCtx,
 		bson.D{{Key: "_id", Value: id}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "completed", Value: completed}}}},
 	)
@@ -154,13 +157,16 @@ func (ms *MongoStorage) SetCompleted(ctx context.Context, id int, completed bool
 }
 
 func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) error {
-	if id <= 0 {
-		return fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	if err := todo.ValidateID(id); err != nil {
+		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	if err := todo.ValidateDescription(description); err != nil {
+		return err
+	}
+	opCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	result, err := ms.coll().UpdateOne(ctx,
+	result, err := ms.coll().UpdateOne(opCtx,
 		bson.D{{Key: "_id", Value: id}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "description", Value: description}}}},
 	)

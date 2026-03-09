@@ -12,8 +12,6 @@ import (
 )
 
 const (
-	maxDescriptionLength = 500
-
 	ansiStrikethrough = "\033[9m"
 	ansiReset         = "\033[0m"
 )
@@ -26,17 +24,20 @@ type menuItem struct {
 }
 
 type App struct {
-	store   todo.Storage
-	scanner *bufio.Scanner
-	ctx     context.Context
-	menu    []menuItem
+	store    todo.Storage
+	ctx      context.Context
+	menu     []menuItem
+	lines    chan string
+	scanDone chan struct{}
+	scanErr  error
 }
 
 func New(ctx context.Context, store todo.Storage, scanner *bufio.Scanner) *App {
 	app := &App{
-		store:   store,
-		scanner: scanner,
-		ctx:     ctx,
+		store:    store,
+		ctx:      ctx,
+		lines:    make(chan string),
+		scanDone: make(chan struct{}),
 	}
 	app.menu = []menuItem{
 		{"Add a todo", app.handleAdd},
@@ -47,7 +48,21 @@ func New(ctx context.Context, store todo.Storage, scanner *bufio.Scanner) *App {
 		{"Edit a todo", app.handleEdit},
 		{"Exit", func() error { return errExit }},
 	}
+	go app.readInput(scanner)
 	return app
+}
+
+func (a *App) readInput(scanner *bufio.Scanner) {
+	defer close(a.scanDone)
+	defer close(a.lines)
+	for scanner.Scan() {
+		select {
+		case a.lines <- scanner.Text():
+		case <-a.ctx.Done():
+			return
+		}
+	}
+	a.scanErr = scanner.Err()
 }
 
 func (a *App) Run() error {
@@ -55,7 +70,10 @@ func (a *App) Run() error {
 	for {
 		choice, err := a.readLine("> Choose an option: ")
 		if err != nil {
-			return nil
+			if errors.Is(err, errExit) {
+				return nil
+			}
+			return err
 		}
 		option, parseErr := strconv.Atoi(choice)
 		if parseErr != nil || option < 1 || option > len(a.menu) {
@@ -95,10 +113,18 @@ func printTodos(todos []todo.Todo) {
 
 func (a *App) readLine(prompt string) (string, error) {
 	fmt.Print(prompt)
-	if !a.scanner.Scan() {
+	select {
+	case <-a.ctx.Done():
 		return "", errExit
+	case line, ok := <-a.lines:
+		if !ok {
+			if a.scanErr != nil {
+				return "", fmt.Errorf("input error: %w", a.scanErr)
+			}
+			return "", errExit
+		}
+		return strings.TrimSpace(line), nil
 	}
-	return strings.TrimSpace(a.scanner.Text()), nil
 }
 
 func (a *App) readID(prompt string) (int, error) {
@@ -130,24 +156,27 @@ func (a *App) readDescription(prompt string) (string, error) {
 	if desc == "" {
 		return "", fmt.Errorf("description cannot be empty")
 	}
-	if len(desc) > maxDescriptionLength {
-		return "", fmt.Errorf("description exceeds maximum length of %d characters", maxDescriptionLength)
+	if len(desc) > todo.MaxDescriptionLength {
+		return "", fmt.Errorf("description exceeds maximum length of %d characters", todo.MaxDescriptionLength)
 	}
 	return desc, nil
+}
+
+func (a *App) handleErr(err error) error {
+	if errors.Is(err, errExit) {
+		return err
+	}
+	fmt.Printf("Error: %v\n", err)
+	return nil
 }
 
 func (a *App) handleAdd() error {
 	desc, err := a.readDescription("> Enter description: ")
 	if err != nil {
-		if errors.Is(err, errExit) {
-			return err
-		}
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	if err := a.store.Add(a.ctx, desc); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	fmt.Println("Todo added successfully.")
 	return nil
@@ -156,8 +185,7 @@ func (a *App) handleAdd() error {
 func (a *App) handleList() error {
 	todos, err := a.store.List(a.ctx)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	printTodos(todos)
 	return nil
@@ -166,15 +194,10 @@ func (a *App) handleList() error {
 func (a *App) handleDelete() error {
 	id, err := a.listAndPromptID("> Enter todo ID to delete: ")
 	if err != nil {
-		if errors.Is(err, errExit) {
-			return err
-		}
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	if err := a.store.Delete(a.ctx, id); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	fmt.Println("Todo deleted successfully.")
 	return nil
@@ -187,15 +210,10 @@ func (a *App) handleSetCompleted(completed bool) error {
 	}
 	id, err := a.listAndPromptID(fmt.Sprintf("> Enter todo ID to mark as %s: ", action))
 	if err != nil {
-		if errors.Is(err, errExit) {
-			return err
-		}
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	if err := a.store.SetCompleted(a.ctx, id, completed); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	fmt.Printf("Todo marked as %s.\n", action)
 	return nil
@@ -204,23 +222,14 @@ func (a *App) handleSetCompleted(completed bool) error {
 func (a *App) handleEdit() error {
 	id, err := a.listAndPromptID("> Enter todo ID to edit: ")
 	if err != nil {
-		if errors.Is(err, errExit) {
-			return err
-		}
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	desc, err := a.readDescription("> Enter new description: ")
 	if err != nil {
-		if errors.Is(err, errExit) {
-			return err
-		}
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	if err := a.store.Edit(a.ctx, id, desc); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return nil
+		return a.handleErr(err)
 	}
 	fmt.Println("Todo updated successfully.")
 	return nil

@@ -18,7 +18,7 @@ func newTestMongoStorage(t *testing.T) *MongoStorage {
 	}
 
 	dbName := "test_todos_cli"
-	s, err := NewMongoStorage(uri, dbName)
+	s, err := NewMongoStorage(context.Background(), uri, dbName)
 	if err != nil {
 		t.Fatalf("NewMongoStorage: %v", err)
 	}

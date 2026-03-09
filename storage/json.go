@@ -83,8 +83,8 @@ func (js *JSONStorage) save(todos []todo.Todo) error {
 }
 
 func (js *JSONStorage) findByID(todos []todo.Todo, id int) (int, error) {
-	if id <= 0 {
-		return -1, fmt.Errorf("id %d: %w", id, todo.ErrInvalidID)
+	if err := todo.ValidateID(id); err != nil {
+		return -1, err
 	}
 	for i := range todos {
 		if todos[i].ID == id {
@@ -94,7 +94,13 @@ func (js *JSONStorage) findByID(todos []todo.Todo, id int) (int, error) {
 	return -1, fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
 }
 
-func (js *JSONStorage) Add(_ context.Context, description string) error {
+func (js *JSONStorage) Add(ctx context.Context, description string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := todo.ValidateDescription(description); err != nil {
+		return err
+	}
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -108,13 +114,19 @@ func (js *JSONStorage) Add(_ context.Context, description string) error {
 	return js.save(todos)
 }
 
-func (js *JSONStorage) List(_ context.Context) ([]todo.Todo, error) {
+func (js *JSONStorage) List(ctx context.Context) ([]todo.Todo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	js.mu.RLock()
 	defer js.mu.RUnlock()
 	return js.load()
 }
 
-func (js *JSONStorage) Delete(_ context.Context, id int) error {
+func (js *JSONStorage) Delete(ctx context.Context, id int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -130,7 +142,10 @@ func (js *JSONStorage) Delete(_ context.Context, id int) error {
 	return js.save(todos)
 }
 
-func (js *JSONStorage) SetCompleted(_ context.Context, id int, completed bool) error {
+func (js *JSONStorage) SetCompleted(ctx context.Context, id int, completed bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -152,7 +167,13 @@ func (js *JSONStorage) SetCompleted(_ context.Context, id int, completed bool) e
 	return js.save(todos)
 }
 
-func (js *JSONStorage) Edit(_ context.Context, id int, description string) error {
+func (js *JSONStorage) Edit(ctx context.Context, id int, description string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := todo.ValidateDescription(description); err != nil {
+		return err
+	}
 	js.mu.Lock()
 	defer js.mu.Unlock()
 

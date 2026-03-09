@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -24,29 +23,19 @@ func main() {
 		log.Fatal("MONGO_URI and MONGO_DB must be set in environment")
 	}
 
-	store, err := storage.NewMongoStorage(mongoURI, mongoDB)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	store, err := storage.NewMongoStorage(ctx, mongoURI, mongoDB)
 	if err != nil {
 		log.Fatalf("Error connecting to MongoDB: %v", err)
 	}
 	defer store.Close()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	go func() {
-		<-ctx.Done()
-		fmt.Println("\nShutting down...")
-		os.Stdin.Close()
-	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	app := cli.New(ctx, store, scanner)
 
 	if err := app.Run(); err != nil {
 		log.Fatalf("Error: %v", err)
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Printf("Error reading input: %v\n", err)
 	}
 }
