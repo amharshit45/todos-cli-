@@ -40,7 +40,7 @@ func main() {
 	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
-	app := cli.New(store, scanner)
+	app := cli.New(store, scanner, os.Stdout)
 
 	if err := app.Run(ctx); err != nil {
 		log.Fatalf("Error: %v", err)

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -95,14 +96,15 @@ func (ms *MongoStorage) Add(ctx context.Context, description string) error {
 	return nil
 }
 
-// rollbackID decrements the counter sequence on a best-effort basis when
-// InsertOne fails after nextID succeeds, preventing gaps in the ID sequence.
 func (ms *MongoStorage) rollbackID(ctx context.Context) {
-	ms.client.Database(ms.dbName).Collection(counterCollection).
+	err := ms.client.Database(ms.dbName).Collection(counterCollection).
 		FindOneAndUpdate(ctx,
 			bson.D{{Key: "_id", Value: collectionName}},
 			bson.D{{Key: "$inc", Value: bson.D{{Key: "seq", Value: -1}}}},
-		)
+		).Err()
+	if err != nil {
+		log.Printf("failed to rollback ID counter: %v", err)
+	}
 }
 
 func (ms *MongoStorage) List(ctx context.Context) ([]todo.Todo, error) {
