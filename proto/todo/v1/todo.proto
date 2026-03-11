@@ -51,11 +51,18 @@ message EditDescriptionRequest {
 
 message EditDescriptionResponse {}
 
+// TodoService manages todo items over gRPC.
 service TodoService {
+  // Add creates a new todo with a title and optional description.
   rpc Add(AddRequest) returns (AddResponse);
+  // List returns all todos ordered by ID.
   rpc List(ListRequest) returns (ListResponse);
+  // Delete removes a todo by ID.
   rpc Delete(DeleteRequest) returns (DeleteResponse);
+  // SetCompleted marks a todo as completed or incomplete.
   rpc SetCompleted(SetCompletedRequest) returns (SetCompletedResponse);
+  // EditTitle updates the title of a todo.
   rpc EditTitle(EditTitleRequest) returns (EditTitleResponse);
+  // EditDescription updates the description of a todo.
   rpc EditDescription(EditDescriptionRequest) returns (EditDescriptionResponse);
 }
