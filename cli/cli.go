@@ -69,7 +69,7 @@ func (a *App) Run(ctx context.Context) error {
 	go a.readInput(ctx)
 	a.printMenu()
 	for {
-		choice, err := a.readLine(ctx, "> Choose an option (0 for help): ")
+		choice, err := a.readLine(ctx, "> Choose an option (0 for help menu): ")
 		if err != nil {
 			if errors.Is(err, errExit) {
 				return nil
@@ -161,7 +161,16 @@ func (a *App) listAndPromptID(ctx context.Context, prompt string) (int, error) {
 	if len(todos) == 0 {
 		return 0, fmt.Errorf("no todos to select from")
 	}
-	return a.readID(ctx, prompt)
+	id, err := a.readID(ctx, prompt)
+	if err != nil {
+		return 0, err
+	}
+	for _, t := range todos {
+		if t.ID == id {
+			return id, nil
+		}
+	}
+	return 0, fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
 }
 
 func (a *App) handleErr(err error) error {
@@ -175,6 +184,9 @@ func (a *App) handleErr(err error) error {
 func (a *App) handleAdd(ctx context.Context) error {
 	title, err := a.readLine(ctx, "> Enter title: ")
 	if err != nil {
+		return a.handleErr(err)
+	}
+	if err := todo.ValidateTitle(title); err != nil {
 		return a.handleErr(err)
 	}
 	desc, err := a.readLine(ctx, "> Enter description (optional): ")
