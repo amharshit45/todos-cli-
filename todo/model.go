@@ -5,10 +5,14 @@ import (
 	"unicode/utf8"
 )
 
-const MaxDescriptionLength = 500
+const (
+	MaxTitleLength       = 100
+	MaxDescriptionLength = 500
+)
 
 type Todo struct {
 	ID          int    `json:"id" bson:"_id"`
+	Title       string `json:"title" bson:"title"`
 	Description string `json:"description" bson:"description"`
 	Completed   bool   `json:"completed" bson:"completed"`
 }
@@ -20,9 +24,19 @@ func ValidateID(id int) error {
 	return nil
 }
 
+func ValidateTitle(title string) error {
+	if title == "" {
+		return ErrEmptyTitle
+	}
+	if n := utf8.RuneCountInString(title); n > MaxTitleLength {
+		return fmt.Errorf("%w: %d characters (max %d)", ErrTitleTooLong, n, MaxTitleLength)
+	}
+	return nil
+}
+
 func ValidateDescription(desc string) error {
 	if desc == "" {
-		return ErrEmptyDescription
+		return nil
 	}
 	if n := utf8.RuneCountInString(desc); n > MaxDescriptionLength {
 		return fmt.Errorf("%w: %d characters (max %d)", ErrDescriptionTooLong, n, MaxDescriptionLength)

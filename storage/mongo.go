@@ -76,7 +76,10 @@ func (ms *MongoStorage) nextID(ctx context.Context) (int, error) {
 	return result.Seq, nil
 }
 
-func (ms *MongoStorage) Add(ctx context.Context, description string) error {
+func (ms *MongoStorage) Add(ctx context.Context, title, description string) error {
+	if err := todo.ValidateTitle(title); err != nil {
+		return err
+	}
 	if err := todo.ValidateDescription(description); err != nil {
 		return err
 	}
@@ -88,7 +91,7 @@ func (ms *MongoStorage) Add(ctx context.Context, description string) error {
 		return err
 	}
 
-	newTodo := todo.Todo{ID: id, Description: description}
+	newTodo := todo.Todo{ID: id, Title: title, Description: description}
 	if _, err := ms.coll().InsertOne(opCtx, newTodo); err != nil {
 		ms.rollbackID(opCtx)
 		return fmt.Errorf("failed to insert todo: %w", err)
@@ -169,7 +172,33 @@ func (ms *MongoStorage) SetCompleted(ctx context.Context, id int, completed bool
 	return nil
 }
 
-func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) error {
+func (ms *MongoStorage) EditTitle(ctx context.Context, id int, title string) error {
+	if err := todo.ValidateID(id); err != nil {
+		return err
+	}
+	if err := todo.ValidateTitle(title); err != nil {
+		return err
+	}
+	opCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+
+	result, err := ms.coll().UpdateOne(opCtx,
+		bson.D{{Key: "_id", Value: id}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "title", Value: title}}}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update todo: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
+	}
+	if result.ModifiedCount == 0 {
+		return fmt.Errorf("todo %d: %w", id, todo.ErrTitleUnchanged)
+	}
+	return nil
+}
+
+func (ms *MongoStorage) EditDescription(ctx context.Context, id int, description string) error {
 	if err := todo.ValidateID(id); err != nil {
 		return err
 	}
@@ -188,6 +217,9 @@ func (ms *MongoStorage) Edit(ctx context.Context, id int, description string) er
 	}
 	if result.MatchedCount == 0 {
 		return fmt.Errorf("todo with id %d: %w", id, todo.ErrNotFound)
+	}
+	if result.ModifiedCount == 0 {
+		return fmt.Errorf("todo %d: %w", id, todo.ErrDescriptionUnchanged)
 	}
 	return nil
 }

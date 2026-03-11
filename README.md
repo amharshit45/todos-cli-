@@ -1,11 +1,12 @@
 # Todo CLI
 
-A command-line todo manager built with Go, backed by MongoDB.
+A command-line todo manager built with Go, backed by MongoDB, with a gRPC client-server architecture.
 
 ## Prerequisites
 
 - Go 1.25+
 - MongoDB (local or Atlas)
+- `protoc` with `protoc-gen-go` and `protoc-gen-go-grpc` (for regenerating protobuf code)
 
 ## Setup
 
@@ -21,6 +22,7 @@ A command-line todo manager built with Go, backed by MongoDB.
    ```
    MONGO_URI=mongodb+srv://<user>:<password>@<cluster>/?appName=<app>
    MONGO_DB=todocli
+   GRPC_ADDR=:50051
    ```
 
 3. Install dependencies:
@@ -29,17 +31,43 @@ A command-line todo manager built with Go, backed by MongoDB.
    go mod download
    ```
 
+## Architecture
+
+The application is split into a gRPC server and a CLI client:
+
+```
+CLI Client ──gRPC──▶ TodoService Server ──▶ MongoDB
+```
+
+- **Server** (`cmd/server`): Hosts the `TodoService` gRPC service backed by MongoDB.
+- **Client** (`cmd/client`): Interactive CLI that sends requests to the server over gRPC.
+
 ## Build & Run
+
+Build both binaries:
 
 ```bash
 make build
-make run
 ```
 
-Or run directly:
+Start the server (requires MongoDB):
 
 ```bash
-go run main.go
+make run-server
+```
+
+In another terminal, start the client:
+
+```bash
+make run-client
+```
+
+Or run directly with `go run`:
+
+```bash
+go run ./cmd/server
+# in another terminal
+go run ./cmd/client
 ```
 
 ## Usage
@@ -58,20 +86,51 @@ The CLI presents an interactive menu:
 ====================
 ```
 
+## Configuration
+
+| Variable    | Description                | Default          |
+|-------------|----------------------------|------------------|
+| `MONGO_URI` | MongoDB connection string  | *(required)*     |
+| `MONGO_DB`  | MongoDB database name      | *(required)*     |
+| `GRPC_ADDR` | gRPC listen/connect address| `:50051`         |
+
+The server uses `GRPC_ADDR` as the listen address; the client uses it as the dial target (defaults to `localhost:50051`).
+
 ## Project Structure
 
 ```
 .
-├── main.go              # CLI entry point and REPL loop
+├── cmd/
+│   ├── server/main.go           # gRPC server entry point
+│   └── client/main.go           # CLI client entry point
+├── proto/todo/v1/todo.proto     # Protobuf service definition
+├── gen/todopb/                  # Generated protobuf + gRPC Go code
+├── server/
+│   ├── grpc.go                  # gRPC service implementation
+│   └── grpc_test.go             # Server tests (bufconn + mock storage)
+├── grpcclient/
+│   └── client.go                # gRPC client implementing todo.Storage
+├── cli/
+│   ├── cli.go                   # Interactive CLI (unchanged)
+│   └── cli_test.go              # CLI tests (mock storage)
 ├── todo/
-│   ├── model.go         # Todo struct definition
-│   └── storage.go       # Storage interface
+│   ├── model.go                 # Todo struct and validation
+│   ├── storage.go               # Storage interface
+│   └── errors.go                # Domain errors
 ├── storage/
-│   ├── json.go          # JSON file-based storage implementation
-│   └── mongo.go         # MongoDB storage implementation
-├── Makefile             # Build, run, test, clean targets
-└── .env                 # MongoDB connection config (not committed)
+│   ├── mongo.go                 # MongoDB storage implementation
+│   └── mongo_test.go            # MongoDB integration tests
+├── Makefile                     # Build, run, test, proto targets
+└── .env                         # Config (not committed)
 ```
+
+## Regenerating Protobuf Code
+
+```bash
+make proto
+```
+
+Requires `protoc`, `protoc-gen-go`, and `protoc-gen-go-grpc` to be installed.
 
 ## Testing
 

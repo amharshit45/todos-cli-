@@ -69,7 +69,7 @@ func (a *App) Run(ctx context.Context) error {
 	go a.readInput(ctx)
 	a.printMenu()
 	for {
-		choice, err := a.readLine(ctx, "> Choose an option: ")
+		choice, err := a.readLine(ctx, "> Choose an option (0 for help): ")
 		if err != nil {
 			if errors.Is(err, errExit) {
 				return nil
@@ -77,8 +77,12 @@ func (a *App) Run(ctx context.Context) error {
 			return err
 		}
 		option, parseErr := strconv.Atoi(choice)
-		if parseErr != nil || option < 1 || option > len(a.menu) {
-			fmt.Fprintf(a.out, "Error: please enter a number between 1 and %d.\n", len(a.menu))
+		if parseErr != nil || option < 0 || option > len(a.menu) {
+			fmt.Fprintf(a.out, "Error: please enter a number between 0 and %d.\n", len(a.menu))
+			continue
+		}
+		if option == 0 {
+			a.printMenu()
 			continue
 		}
 		if err := a.menu[option-1].handler(ctx); err != nil {
@@ -104,10 +108,14 @@ func (a *App) printTodos(todos []todo.Todo) {
 		return
 	}
 	for _, t := range todos {
+		label := t.Title
+		if t.Description != "" {
+			label += " - " + t.Description
+		}
 		if t.Completed {
-			fmt.Fprintf(a.out, "[✓] %d. %s\n", t.ID, strikethrough.Sprint(t.Description))
+			fmt.Fprintf(a.out, "[✓] %d. %s\n", t.ID, strikethrough.Sprint(label))
 		} else {
-			fmt.Fprintf(a.out, "[ ] %d. %s\n", t.ID, t.Description)
+			fmt.Fprintf(a.out, "[ ] %d. %s\n", t.ID, label)
 		}
 	}
 }
@@ -122,7 +130,7 @@ func (a *App) readLine(ctx context.Context, prompt string) (string, error) {
 			select {
 			case err := <-a.scanErr:
 				if err != nil {
-					return "", fmt.Errorf("input error: %w", err)
+					return "", errors.New("input error")
 				}
 			default:
 			}
@@ -139,7 +147,7 @@ func (a *App) readID(ctx context.Context, prompt string) (int, error) {
 	}
 	id, parseErr := strconv.Atoi(input)
 	if parseErr != nil {
-		return 0, fmt.Errorf("invalid ID %q: %w", input, parseErr)
+		return 0, fmt.Errorf("invalid ID %q", input)
 	}
 	return id, nil
 }
@@ -165,11 +173,15 @@ func (a *App) handleErr(err error) error {
 }
 
 func (a *App) handleAdd(ctx context.Context) error {
-	desc, err := a.readLine(ctx, "> Enter description: ")
+	title, err := a.readLine(ctx, "> Enter title: ")
 	if err != nil {
 		return a.handleErr(err)
 	}
-	if err := a.store.Add(ctx, desc); err != nil {
+	desc, err := a.readLine(ctx, "> Enter description (optional): ")
+	if err != nil {
+		return a.handleErr(err)
+	}
+	if err := a.store.Add(ctx, title, desc); err != nil {
 		return a.handleErr(err)
 	}
 	fmt.Fprintln(a.out, "Todo added successfully.")
@@ -207,6 +219,10 @@ func (a *App) handleSetCompleted(ctx context.Context, completed bool) error {
 		return a.handleErr(err)
 	}
 	if err := a.store.SetCompleted(ctx, id, completed); err != nil {
+		if errors.Is(err, todo.ErrAlreadyCompleted) || errors.Is(err, todo.ErrAlreadyIncomplete) {
+			fmt.Fprintf(a.out, "Info: todo %d is already %s.\n", id, action)
+			return nil
+		}
 		return a.handleErr(err)
 	}
 	fmt.Fprintf(a.out, "Todo marked as %s.\n", action)
@@ -218,13 +234,70 @@ func (a *App) handleEdit(ctx context.Context) error {
 	if err != nil {
 		return a.handleErr(err)
 	}
-	desc, err := a.readLine(ctx, "> Enter new description: ")
+
+	field, err := a.readLine(ctx, "> Edit (t)itle, (d)escription, or (b)oth? ")
 	if err != nil {
 		return a.handleErr(err)
 	}
-	if err := a.store.Edit(ctx, id, desc); err != nil {
-		return a.handleErr(err)
+
+	switch strings.ToLower(field) {
+	case "t", "title":
+		if err := a.doEditTitle(ctx, id); err != nil {
+			return a.handleErr(err)
+		}
+
+	case "d", "description":
+		if err := a.doEditDescription(ctx, id); err != nil {
+			return a.handleErr(err)
+		}
+
+	case "b", "both":
+		if err := a.doEditTitle(ctx, id); err != nil {
+			return a.handleErr(err)
+		}
+		if err := a.doEditDescription(ctx, id); err != nil {
+			return a.handleErr(err)
+		}
+
+	default:
+		fmt.Fprintf(a.out, "Error: invalid choice %q, enter 't', 'd', or 'b'.\n", field)
 	}
-	fmt.Fprintln(a.out, "Todo updated successfully.")
+
+	return nil
+}
+
+// doEditTitle prompts for and applies a title change.
+// Returns nil on success (including "unchanged" info), or an error.
+func (a *App) doEditTitle(ctx context.Context, id int) error {
+	title, err := a.readLine(ctx, "> Enter new title: ")
+	if err != nil {
+		return err
+	}
+	if err := a.store.EditTitle(ctx, id, title); err != nil {
+		if errors.Is(err, todo.ErrTitleUnchanged) {
+			fmt.Fprintln(a.out, "Info: title is already the same.")
+			return nil
+		}
+		return err
+	}
+	fmt.Fprintln(a.out, "Title updated successfully.")
+	return nil
+}
+
+// doEditDescription prompts for and applies a description change.
+// Returns nil on success (including "unchanged" info), or an error.
+func (a *App) doEditDescription(ctx context.Context, id int) error {
+	desc, err := a.readLine(ctx, "> Enter new description: ")
+	if err != nil {
+		return err
+	}
+	if err := a.store.EditDescription(ctx, id, desc); err != nil {
+		if errors.Is(err, todo.ErrDescriptionUnchanged) {
+			fmt.Fprintln(a.out, "Info: description is already the same.")
+			return nil
+		}
+		return err
+	}
+	fmt.Fprintln(a.out, "Description updated successfully.")
 	return nil
 }

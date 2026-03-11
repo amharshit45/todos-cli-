@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package todo.v1;
+
+option go_package = "github.com/amharshit45/todos-cli-/gen/todopb";
+
+message Todo {
+  int32 id = 1;
+  string title = 2;
+  string description = 3;
+  bool completed = 4;
+}
+
+message AddRequest {
+  string title = 1;
+  string description = 2;
+}
+
+message AddResponse {}
+
+message ListRequest {}
+
+message ListResponse {
+  repeated Todo todos = 1;
+}
+
+message DeleteRequest {
+  int32 id = 1;
+}
+
+message DeleteResponse {}
+
+message SetCompletedRequest {
+  int32 id = 1;
+  bool completed = 2;
+}
+
+message SetCompletedResponse {}
+
+message EditTitleRequest {
+  int32 id = 1;
+  string title = 2;
+}
+
+message EditTitleResponse {}
+
+message EditDescriptionRequest {
+  int32 id = 1;
+  string description = 2;
+}
+
+message EditDescriptionResponse {}
+
+service TodoService {
+  rpc Add(AddRequest) returns (AddResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc SetCompleted(SetCompletedRequest) returns (SetCompletedResponse);
+  rpc EditTitle(EditTitleRequest) returns (EditTitleResponse);
+  rpc EditDescription(EditDescriptionRequest) returns (EditDescriptionResponse);
+}
